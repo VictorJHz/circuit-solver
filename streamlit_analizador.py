@@ -175,7 +175,7 @@ with col1:
             plt.figtext(0.02, 0.02, "Activos: flecha del positivo (+) al negativo (-) | Pasivos: direccion convencional de corriente", fontsize=10, style='italic')
             st.pyplot(fig)
 
-# ----- Generar Sistema de Ecuaciones (VERSION FINAL CORREGIDA) -----
+# ----- Generar Sistema de Ecuaciones -----
 with col2:
     if st.button("Generar Ecuaciones"):
         if not st.session_state.componentes:
@@ -187,7 +187,7 @@ with col2:
                 tau = R * C
                 st.subheader("Analisis Completo del Circuito RC")
                 
-                # ========== 1. CONVENCION UNICA Y CONSISTENTE ==========
+                # ========== 1. CONVENCION UNICA ==========
                 st.write("### 🔷 CONVENCION UNICA Y CONSISTENTE")
                 st.markdown("""
                 **Convencion de signos adoptada (UNICA para todo el desarrollo):**
@@ -196,29 +196,25 @@ with col2:
                 - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo)
                 """)
                 
-                # ========== 2. MATRIZ DE INCIDENCIA A (UNICA) ==========
-                st.write("**1. Matriz de Incidencia A (UNICA - no cambia)**")
+                # ========== 2. MATRIZ DE INCIDENCIA A ==========
+                st.write("**1. Matriz de Incidencia A (UNICA)**")
                 st.write("**Orden de ramas:** [V1, R1, C1]")
                 st.write("**Convencion:** +1 sale, -1 entra")
-                A = Matrix([
-                    [1, -1, 0],   # Nodo N1: V1 sale, R1 entra
-                    [0, 1, -1]    # Nodo N2: R1 sale, C1 entra
-                ])
                 st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
                 st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
                 
-                # ========== 3. VECTOR e (potenciales nodales) ==========
+                # ========== 3. VECTOR e ==========
                 st.write("**2. Vector e (Potenciales nodales)**")
                 st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
                 st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
                 
-                # ========== 4. KCL en forma matricial ==========
+                # ========== 4. KCL ==========
                 st.write("**3. KCL en forma matricial**")
                 st.latex(r"A \cdot i = 0")
                 st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
                 st.caption("Ecuaciones: i_V1 - i_R1 = 0, i_R1 - i_C1 = 0")
                 
-                # ========== 5. KVL en forma matricial con interpretacion explicita ==========
+                # ========== 5. KVL con interpretacion ==========
                 st.write("**4. KVL en forma matricial**")
                 st.latex(r"v = A^T \cdot e")
                 st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
@@ -226,62 +222,32 @@ with col2:
                 st.latex(r"v_{V1} = V_{N1} - 0 = V_{N1} \quad [V]")
                 st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
                 st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
-                st.caption("Nota: El signo negativo en la tercera fila de Aᵀ indica que v_C1 = -V_N2, pero por definicion v_C1 = V_N2 - 0 = V_N2")
                 
-                # ========== 6. BR EN DOMINIO TIEMPO (NO LAPLACE) ==========
+                # ========== 6. BR EN DOMINIO TIEMPO ==========
                 st.write("**5. Relaciones de los Componentes (BR) en dominio tiempo**")
                 st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} \quad [V]")
                 st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} \quad [V]")
                 st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} \quad [A]")
                 st.caption("**NOTA:** Todas las ecuaciones estan en dominio del tiempo (no Laplace)")
                 
-                # ========== 7. MATRIZ Z EN DOMINIO TIEMPO ==========
+                # ========== 7. MATRIZ Z ==========
                 st.write("**6. Matriz Z (Impedancias) - Notacion en tiempo**")
                 st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
                 st.caption("El operador 1/(C·d/dt) representa la relacion integral: v_C = (1/C)∫ i_C dt")
                 
-                # ========== 8. VECTOR Vs (mapeo explicito) ==========
+                # ========== 8. VECTOR Vs ==========
                 st.write("**7. Vector Vs (Fuentes de voltaje)**")
                 st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix}")
                 st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
                 
-                # ========== 9. MATRIZ M DEL METODO TABLEAU (FORMA RIGUROSA) ==========
-                st.write("**8. Matriz M del Metodo de Tablueau**")
-                st.write("**Estructura rigurosa (forma estandar):**")
+                # ========== 9. ESTRUCTURA DEL METODO TABLEAU ==========
+                st.write("**8. Estructura del Metodo de Tablueau**")
                 st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
                 st.write("")
-                st.write("**Donde:**")
-                st.write("- **A** = Matriz de incidencia")
-                st.write("- **I** = Matriz identidad")
-                st.write("- **Z** = Matriz de impedancias")
-                st.write("- **e** = Potenciales nodales")
-                st.write("- **i** = Corrientes de rama")
-                st.write("- **v** = Voltajes de rama")
-                st.write("- **V_s** = Fuentes de voltaje")
-                st.write("")
-                st.write("**Para el circuito RC:**")
+                st.write("**Variables:**")
+                st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
                 
-                # Matriz M completa con bloques
-                st.latex(r"M = \left[\begin{array}{cc|ccc|ccc} 
-                0 & 0 & 1 & -1 & 0 & 0 & 0 & 0 \\
-                0 & 0 & 0 & 1 & -1 & 0 & 0 & 0 \\
-                \hline
-                0 & 0 & 0 & 0 & 0 & 1 & 0 & 0 \\
-                0 & 0 & 0 & 0 & 0 & 0 & 1 & 0 \\
-                0 & 0 & 0 & 0 & 0 & 0 & 0 & 1 \\
-                \hline
-                1 & 0 & 0 & 0 & 0 & -1 & 0 & 0 \\
-                -1 & 1 & 0 & 0 & 0 & 0 & -1 & 0 \\
-                0 & -1 & 0 & 0 & 0 & 0 & 0 & -1
-                \end{array}\right]")
-                
-                st.write("**Vector x:**")
-                st.latex(r"x = \begin{bmatrix} V_{N1} \\ V_{N2} \\ i_{V1} \\ i_{R1} \\ i_{C1} \\ v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
-                
-                st.write("**Vector b:**")
-                st.latex(r"b = \begin{bmatrix} 0 \\ 0 \\ 0 \\ 0 \\ 0 \\ V_{in} \\ 0 \\ 0 \end{bmatrix}")
-                
-                # ========== 10. ECUACION DIFERENCIAL EN TIEMPO ==========
+                # ========== 10. ECUACION DIFERENCIAL ==========
                 st.write("**9. Ecuacion Diferencial del Circuito (dominio tiempo)**")
                 st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
                 st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
@@ -431,10 +397,6 @@ with col6:
         st.write("**Matriz de Incidencia A (UNICA)**")
         st.write("**Orden de ramas:** [V1, R1, C1]")
         st.write("**Convencion:** +1 sale, -1 entra")
-        A = Matrix([
-            [1, -1, 0],
-            [0, 1, -1]
-        ])
         st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
         st.caption("**NOTA:** Esta es la UNICA matriz A. No hay versiones alternativas.")
 
