@@ -8,7 +8,7 @@ import re
 # ---------- CONFIGURACIÓN ----------
 st.set_page_config(page_title="Circuit Solver", layout="wide")
 st.title("⚡ Circuit Solver")
-st.caption("Analisis de circuitos electricos - Metodo de Tablueau")
+st.caption("Analisis de circuitos electricos - Metodo de Tablueau en dominio tiempo")
 
 # ---------- SESSION STATE ----------
 if 'componentes' not in st.session_state:
@@ -31,7 +31,6 @@ def parse_valor(valor_str):
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
-    # Eliminar palabras como dc, ac
     valor_str = re.sub(r'[a-z]+', '', valor_str)
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
@@ -257,15 +256,15 @@ def generar_reporte_completo(R, C, Vin):
     
     # ========== 1. CONVENCION UNICA ==========
     st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
-    st.markdown("""
+    st.markdown(r"""
     **Convencion de signos adoptada (UNICA para todo el desarrollo):**
     - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
-    - **KVL:** v_rama = e_origen - e_destino
-    - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo, Z es operador diferencial)
+    - **KVL:** $v_{rama} = e_{origen} - e_{destino}$
+    - **BR:** $v_{rama} = Z \cdot i_{rama} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
     """)
     
     # ========== 2. MATRIZ DE INCIDENCIA A ==========
-    st.markdown("### 1. Matriz de Incidencia A (UNICA)")
+    st.markdown("### 1. Matriz de Incidencia A")
     st.write("**Orden de ramas:** [V1, R1, C1]")
     st.write("**Convencion:** +1 sale, -1 entra")
     st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
@@ -280,7 +279,7 @@ def generar_reporte_completo(R, C, Vin):
     st.markdown("### 3. KCL en forma matricial")
     st.latex(r"A \cdot i = 0")
     st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
-    st.caption("Ecuaciones: i_V1 - i_R1 = 0, i_R1 - i_C1 = 0")
+    st.caption("Ecuaciones: $i_{V1} - i_{R1} = 0$, $i_{R1} - i_{C1} = 0$")
     
     # ========== 5. KVL EN FORMA MATRICIAL ==========
     st.markdown("### 4. KVL en forma matricial")
@@ -300,40 +299,49 @@ def generar_reporte_completo(R, C, Vin):
     st.write("**Forma integral equivalente del capacitor:**")
     st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
     
-    # ========== 7. MATRIZ Z ==========
-    st.markdown("### 6. Matriz Z (Impedancias) - Operador en dominio tiempo")
-    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
-    st.caption("El operador 1/(C·d/dt) representa la relacion integral: v_C = (1/C)∫ i_C dt")
+    # ========== 7. MATRIZ Z (OPERADOR) ==========
+    st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
+    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \cdot \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
+    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1}$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
     
     # ========== 8. VECTOR Vs ==========
     st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
     st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
     st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
     
-    # ========== 9. METODO DE TABLEAU ==========
-    st.markdown("### 8. Metodo de Tablueau - Forma Estandar")
+    # ========== 9. METODO DE TABLEAU - ESTRUCTURA EN BLOQUES ==========
+    st.markdown("### 8. Metodo de Tablueau - Estructura en Bloques")
     st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
     st.write("")
-    st.write("**Para el circuito RC:**")
-    st.latex(r"\begin{bmatrix} 0 & 0 & 1 & -1 & 0 & 0 & 0 & 0 \\ 0 & 0 & 0 & 1 & -1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 & 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 0 & 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 & 0 & 0 & 0 & 1 \\ 1 & 0 & 0 & 0 & 0 & -1 & 0 & 0 \\ -1 & 1 & 0 & 0 & 0 & 0 & -1 & 0 \\ 0 & -1 & 0 & 0 & 0 & 0 & 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \\ i_{V1} \\ i_{R1} \\ i_{C1} \\ v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ 0 \\ 0 \\ 0 \\ " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
+    st.write("**Dimensiones de los bloques:**")
+    st.write("- **A**: matriz de incidencia (2×3)")
+    st.write("- **I**: matriz identidad (3×3)")
+    st.write("- **Z**: matriz de operadores (3×3)")
+    st.write("- **Sistema total**: 8 ecuaciones × 8 variables")
+    st.write("")
+    st.write("**Variables:**")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}_{(2×1)},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}_{(3×1)},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}_{(3×1)}")
     
     # ========== 10. ECUACION DIFERENCIAL ==========
-    st.markdown("### 9. Ecuacion Diferencial del Circuito (dominio tiempo)")
+    st.markdown("### 9. Ecuacion Diferencial del Circuito")
     st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
     st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
-    st.caption(f"Unidades: V_C [V], t [s], dV_C/dt [V/s]")
+    st.caption(f"Unidades: $V_C$ [V], $t$ [s], $dV_C/dt$ [V/s]")
     
     # ========== 11. VARIABLE DE ESTADO ==========
     st.markdown("### 10. Variable de Estado")
     st.latex(r"x(t) = V_C(t) \quad [V]")
+    st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
+    st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
     
     # ========== 12. ECUACION DE ESTADO ==========
     st.markdown("### 11. Ecuacion de Estado")
     a = -1/tau
     b = Vin/tau
     st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{V_{{in}}}}{{RC}}")
-    st.latex(rf"\dot{{x}} = {a:.4f} x + {b:.4f} \quad [V/s]")
-    st.caption(f"Forma estandar: ẋ = A·x + B·u | A = {a:.4f} [1/s], B = {b:.4f} [V/s]")
+    st.latex(rf"\dot{{x}} = {a:.6f} x + {b:.6f} \quad [V/s]")
+    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$")
+    st.latex(f"A = {a:.6f}\ [1/s],\quad B = {b:.6f}\ [V/s],\quad u(t) = {Vin:.1f}\ [V]")
     
     # ========== 13. CLASIFICACION DEL SISTEMA ==========
     st.markdown("### 12. Clasificacion del Sistema")
@@ -341,15 +349,16 @@ def generar_reporte_completo(R, C, Vin):
     st.write(f"- **Linealidad:** Lineal")
     st.write(f"- **Invarianza:** Invariante en el tiempo")
     st.write(f"- **Tipo:** Pasa-bajas de primer orden")
+    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en s = -{1/tau:.4f})")
     
     # ========== 14. INTERPRETACION FISICA ==========
     st.markdown("### 13. Interpretacion Fisica")
     st.markdown(f"""
     - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
     - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
-    - **Estado estable:** Despues de {5*tau:.2f} s, Vc ≈ {Vin:.1f} V
-    - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
-    - **Comportamiento:** Respuesta exponencial creciente desde 0 hasta {Vin:.1f} V
+    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \approx {Vin:.1f}$ V
+    - **Constante de tiempo:** $\\tau = {tau:.4f}$ s (63.2% de la carga final)
+    - **Comportamiento:** Respuesta exponencial creciente: $V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})$
     """)
     
     # ========== 15. SOLUCION ANALITICA ==========
@@ -386,7 +395,7 @@ with b2:
             if R is not None and C is not None and Vin is not None:
                 generar_reporte_completo(R, C, Vin)
             else:
-                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para ver el analisis completo.")
+                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje.")
                 st.write("**Componentes actuales:**")
                 for c in st.session_state.componentes:
                     st.write(f"- {c['nombre']}: {c['tipo']}")
@@ -414,9 +423,19 @@ Vc_sol = dsolve(eq, cond);
 
 %% Resultados analiticos
 disp('=== SOLUCION DEL CIRCUITO RC ===');
-fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
+disp('Ecuacion diferencial:');
+disp(eq);
+fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
 disp(' ');
 pretty(Vc_sol);
+
+%% Forma de estado
+A = -1/tau;
+B = Vin/tau;
+fprintf('\\n=== FORMA DE ESTADO ===\\n');
+fprintf('dx/dt = %.6f x + %.6f u\\n', A, B);
+fprintf('u(t) = %.2f [V] (entrada)\\n', Vin);
+fprintf('y(t) = x(t) [V] (salida)\\n');
 
 %% Parametros del sistema
 fprintf('\\n=== PARAMETROS DEL SISTEMA ===\\n');
@@ -424,6 +443,7 @@ fprintf('Constante de tiempo tau = %.4f [s]\\n', tau);
 fprintf('Voltaje final en estado estable = %.2f [V]\\n', Vin);
 fprintf('Tiempo de establecimiento (5tau) = %.4f [s]\\n', 5*tau);
 fprintf('Velocidad de respuesta = 1/tau = %.4f [1/s]\\n', 1/tau);
+fprintf('Polo del sistema = s = -%.4f [1/s]\\n', 1/tau);
 
 %% Grafica de la respuesta
 figure('Position', [100, 100, 800, 500]);
