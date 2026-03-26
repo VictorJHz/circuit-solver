@@ -77,7 +77,7 @@ if st.session_state.componentes:
 else:
     st.info("No hay componentes agregados todavia. Agrega componentes en la barra lateral.")
 
-# ---------- FUNCIONES PARA GENERAR ECUACIONES ----------
+# ---------- FUNCIONES ----------
 def obtener_nodos_unicos(componentes):
     nodos = set()
     for c in componentes:
@@ -90,58 +90,74 @@ def analizar_circuito_rc(componentes):
     R_val = None
     C_val = None
     Vin_val = None
-    nodo_capacitor = None
-    nodo_resistencia = None
     
     for c in componentes:
         if c['tipo'] == "Resistencia":
             R_val = c['valor_total']
-            nodo_resistencia = c['nodo_destino'] if c['nodo_origen'] != "N0" else c['nodo_origen']
         elif c['tipo'] == "Capacitor":
             C_val = c['valor_total']
-            if c['nodo_destino'] == "N0":
-                nodo_capacitor = c['nodo_origen']
-            else:
-                nodo_capacitor = c['nodo_destino']
         elif c['tipo'] == "Fuente de Voltaje":
             Vin_val = c['valor_total']
     
-    return R_val, C_val, Vin_val, nodo_capacitor, nodo_resistencia
+    if R_val is not None and C_val is not None and Vin_val is not None:
+        return R_val, C_val, Vin_val
+    else:
+        return None, None, None
 
-def generar_ecuacion_diferencial_rc(R, C, Vin):
-    """Genera la ecuacion diferencial del circuito RC"""
-    t = symbols('t')
-    Vc = Function('Vc')(t)
+def generar_matriz_incidencia(componentes, nodos):
+    """Genera la matriz de incidencia A (nodos x ramas)"""
+    nodos_no_tierra = [n for n in nodos if n != "N0"]
+    n_nodos = len(nodos_no_tierra)
+    n_ramas = len(componentes)
     
-    # Ecuacion diferencial: Vin - Vc = R * C * dVc/dt
-    eq_diferencial = Eq(Vin - Vc, R * C * Derivative(Vc, t))
+    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
+    A = zeros(n_nodos, n_ramas)
     
-    # Forma estandar: dVc/dt + (1/(RC)) * Vc = Vin/(RC)
-    tau = R * C
-    forma_estandar = Eq(Derivative(Vc, t) + (1/tau) * Vc, Vin/tau)
+    for j, c in enumerate(componentes):
+        if c['nodo_origen'] != "N0":
+            A[nodo_idx[c['nodo_origen']], j] = 1
+        if c['nodo_destino'] != "N0":
+            A[nodo_idx[c['nodo_destino']], j] = -1
     
-    # Variable de estado
-    x = Function('x')(t)
-    x_def = Eq(x, Vc)
-    
-    return eq_diferencial, forma_estandar, tau
+    return A, nodos_no_tierra
 
-def obtener_tipo_sistema(R, C):
-    """Determina el tipo de sistema"""
-    tau = R * C
-    if tau > 0:
-        return "Sistema de primer orden", "Lineal", "Invariante en el tiempo"
-    return None, None, None
-
-def interpretacion_fisica(Vin, tau):
-    """Interpretacion fisica del resultado"""
-    return f"""
-    **Interpretacion Fisica:**
-    - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin} V
-    - **Régimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
-    - **Estado estable:** Después de {5*tau:.2f} s, Vc ≈ {Vin} V
-    - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
-    """
+def generar_sistema_tablueau(componentes, nodos):
+    """Genera el sistema matricial completo M·x = b (Método de Tablueau)"""
+    nodos_no_tierra = [n for n in nodos if n != "N0"]
+    n_nodos = len(nodos_no_tierra)
+    n_ramas = len(componentes)
+    
+    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
+    
+    # Matriz de incidencia A (n_nodos x n_ramas)
+    A = zeros(n_nodos, n_ramas)
+    
+    # Matrices Z e Y para componentes
+    Z = zeros(n_ramas, n_ramas)
+    Y = zeros(n_ramas, n_ramas)
+    Vs = zeros(n_ramas, 1)
+    Is = zeros(n_ramas, 1)
+    
+    for j, c in enumerate(componentes):
+        # Matriz de incidencia
+        if c['nodo_origen'] != "N0":
+            A[nodo_idx[c['nodo_origen']], j] = 1
+        if c['nodo_destino'] != "N0":
+            A[nodo_idx[c['nodo_destino']], j] = -1
+        
+        # Relaciones de componentes
+        if c['tipo'] == "Resistencia":
+            Z[j, j] = c['valor_total']
+        elif c['tipo'] == "Capacitor":
+            Z[j, j] = 1/(c['valor_total'] * symbols('s'))
+        elif c['tipo'] == "Inductor":
+            Z[j, j] = c['valor_total'] * symbols('s')
+        elif c['tipo'] == "Fuente de Voltaje":
+            Vs[j, 0] = c['valor_total']
+        elif c['tipo'] == "Fuente de Corriente":
+            Is[j, 0] = c['valor_total']
+    
+    return A, Z, Vs, Is, n_nodos, n_ramas
 
 def dibujar_grafo_con_polaridad(componentes):
     G = nx.MultiDiGraph()
@@ -215,142 +231,123 @@ with col1:
             plt.figtext(0.02, 0.02, "Activos: flecha del positivo (+) al negativo (-) | Pasivos: direccion convencional de corriente", fontsize=10, style='italic')
             st.pyplot(fig)
 
-# ----- Generar Sistema de Ecuaciones (MEJORADO) -----
+# ----- Generar Sistema de Ecuaciones (CON FORMA MATRICIAL) -----
 with col2:
     if st.button("Generar Ecuaciones"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes primero")
         else:
-            t = symbols('t')
-            nodos = obtener_nodos_unicos(st.session_state.componentes)
+            R, C, Vin = analizar_circuito_rc(st.session_state.componentes)
             
-            # Detectar si es circuito RC
-            R, C, Vin, nodo_cap, _ = analizar_circuito_rc(st.session_state.componentes)
-            
-            if R and C and Vin:
-                # Es un circuito RC - mostrar analisis completo
-                st.subheader("📐 Analisis Completo del Circuito RC")
+            if R is not None and C is not None and Vin is not None:
+                # Circuito RC - mostrar analisis completo con forma matricial
+                st.subheader("Analisis Completo del Circuito RC")
+                tau = R * C
                 
-                # 1. KCL (forma nodal pura, sin corriente de fuente)
+                # 1. KCL
                 st.write("**1. Ley de Corrientes de Kirchhoff (KCL)**")
                 st.latex(r"i_R = i_C")
-                st.caption("La corriente que pasa por la resistencia es igual a la corriente que pasa por el capacitor")
                 
-                # 2. LVK explícito
+                # 2. LVK
                 st.write("**2. Ley de Voltajes de Kirchhoff (LVK)**")
-                st.latex(r"V_{fuente} - V_R - V_C = 0")
-                st.caption("Suma de voltajes en la malla cerrada es igual a cero")
+                st.latex(r"V_{in} - V_R - V_C = 0")
                 
-                # 3. Relaciones de componentes
+                # 3. BR
                 st.write("**3. Relaciones de los Componentes (BR)**")
                 st.latex(r"V_R = R \cdot i_R")
                 st.latex(r"i_C = C \cdot \frac{dV_C}{dt}")
-                st.latex(r"V_{fuente} = V_{in}")
-                st.caption("Ley de Ohm y relacion del capacitor")
+                st.latex(r"V_{in} = 9")
                 
-                # 4. Ecuacion diferencial
-                st.write("**4. Ecuacion Diferencial del Circuito**")
-                eq_diff, forma_std, tau = generar_ecuacion_diferencial_rc(R, C, Vin)
-                st.latex(latex(eq_diff))
-                st.caption(f"Ecuacion diferencial que describe la dinamica del circuito (τ = {tau:.4f} s)")
+                # 4. FORMA MATRICIAL (Método de Tablueau)
+                st.write("**4. Forma Matricial (Metodo de Tablueau)**")
+                st.write("El sistema se puede escribir como M·x = b:")
                 
-                # 5. Forma estandar
-                st.write("**5. Forma Estandar del Sistema**")
-                st.latex(latex(forma_std))
-                st.caption(f"Forma canonica: dVc/dt + (1/τ)·Vc = Vin/τ")
+                # Variables: [V_N1, V_N2, i_V1, i_R1, i_C1]
+                st.latex(r"""
+                M = \begin{bmatrix}
+                1 & 0 & 0 & 0 & 0 \\
+                0 & 1 & 0 & 0 & 0 \\
+                0 & 0 & 1 & -1 & 0 \\
+                0 & 0 & 0 & 1 & -1 \\
+                0 & 0 & 0 & 0 & 1
+                \end{bmatrix}
+                """)
+                
+                st.latex(r"""
+                x = \begin{bmatrix}
+                V_{N1} \\ V_{N2} \\ i_{V1} \\ i_{R1} \\ i_{C1}
+                \end{bmatrix},\quad
+                b = \begin{bmatrix}
+                9 \\ 0 \\ 0 \\ 0 \\ C \cdot \frac{dV_{N2}}{dt}
+                \end{bmatrix}
+                """)
+                
+                st.caption("Forma compacta: A·i = 0 (KCL), v = Aᵀ·e (KVL), v = Z·i + Vs (BR)")
+                
+                # 5. Ecuacion diferencial
+                st.write("**5. Ecuacion Diferencial del Circuito**")
+                st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
+                st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
                 
                 # 6. Variable de estado
                 st.write("**6. Variable de Estado**")
                 st.latex(r"x(t) = V_C(t)")
-                st.caption("La variable de estado es el voltaje en el capacitor")
                 
-                # 7. Tipo de sistema
+                # 7. Clasificacion
                 st.write("**7. Clasificacion del Sistema**")
-                tipo, lineal, invar = obtener_tipo_sistema(R, C)
-                st.write(f"- **Orden:** {tipo}")
-                st.write(f"- **Linealidad:** {lineal}")
-                st.write(f"- **Variacion en el tiempo:** {invar}")
+                st.write(f"- **Orden:** Sistema de primer orden")
+                st.write(f"- **Linealidad:** Lineal")
+                st.write(f"- **Invarianza:** Invariante en el tiempo")
                 
                 # 8. Interpretacion fisica
                 st.write("**8. Interpretacion Fisica**")
-                st.markdown(interpretacion_fisica(Vin, tau))
+                st.markdown(f"""
+                - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
+                - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
+                - **Estado estable:** Despues de {5*tau:.2f} s, Vc ≈ {Vin:.1f} V
+                - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
+                """)
                 
                 # 9. Solucion analitica
                 st.write("**9. Solucion Analitica**")
-                Vc_sol = Vin * (1 - np.exp(-t/tau))
                 st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}})")
                 
             else:
-                # No es RC simple - mostrar ecuaciones basicas
-                st.warning("Circuito no es RC serie simple. Mostrando ecuaciones basicas.")
-                v_nodos = {}
-                for nodo in nodos:
-                    if nodo != "N0":
-                        v_nodos[nodo] = Function(f'V_{nodo}')(t)
-                i_componentes = {}
-                for c in st.session_state.componentes:
-                    if c['needs_current'] or c['tipo'] == "Fuente de Corriente":
-                        i_componentes[c['nombre']] = Function(f'i_{c["nombre"]}')(t)
+                # Circuito general - mostrar forma matricial completa
+                st.subheader("Sistema Matricial Completo (Metodo de Tablueau)")
                 
-                ecuaciones_kcl = []
-                for nodo in nodos:
-                    if nodo == "N0":
-                        continue
-                    suma = 0
-                    for c in st.session_state.componentes:
-                        if c['nodo_origen'] == nodo:
-                            suma += i_componentes[c['nombre']]
-                        elif c['nodo_destino'] == nodo:
-                            suma -= i_componentes[c['nombre']]
-                    if suma != 0:
-                        ecuaciones_kcl.append(Eq(suma, 0))
+                nodos = obtener_nodos_unicos(st.session_state.componentes)
+                A, Z, Vs, Is, n_nodos, n_ramas = generar_sistema_tablueau(st.session_state.componentes, nodos)
                 
-                ecuaciones_br = []
-                for c in st.session_state.componentes:
-                    nombre = c['nombre']
-                    tipo = c['tipo']
-                    valor_total = c['valor_total']
-                    nodo_o = c['nodo_origen']
-                    nodo_d = c['nodo_destino']
+                if n_nodos > 0:
+                    st.write("**Matriz de Incidencia A (nodos x ramas):**")
+                    st.latex(latex(A))
                     
-                    if nodo_o == "N0":
-                        v_o = 0
-                    else:
-                        v_o = v_nodos[nodo_o]
-                    if nodo_d == "N0":
-                        v_d = 0
-                    else:
-                        v_d = v_nodos[nodo_d]
-                    v_diff = v_o - v_d
+                    st.write("**Matriz de Impedancias Z:**")
+                    st.latex(latex(Z))
                     
-                    if tipo == "Resistencia":
-                        ecuaciones_br.append(Eq(v_diff, valor_total * i_componentes[nombre]))
-                    elif tipo == "Capacitor":
-                        ecuaciones_br.append(Eq(i_componentes[nombre], valor_total * Derivative(v_diff, t)))
-                    elif tipo == "Fuente de Voltaje":
-                        if nodo_o == "N0":
-                            ecuaciones_br.append(Eq(v_d - v_o, valor_total))
-                        else:
-                            ecuaciones_br.append(Eq(v_diff, valor_total))
-                    elif tipo == "Fuente de Corriente":
-                        ecuaciones_br.append(Eq(i_componentes[nombre], valor_total))
-                
-                st.write("**KCL - Ley de Corrientes de Kirchhoff**")
-                for eq in ecuaciones_kcl:
-                    st.latex(latex(eq))
-                st.write("**BR - Relaciones de Componentes**")
-                for eq in ecuaciones_br:
-                    st.latex(latex(eq))
+                    st.write("**Vector de Fuentes de Voltaje Vs:**")
+                    st.latex(latex(Vs))
+                    
+                    st.write("**Vector de Fuentes de Corriente Is:**")
+                    st.latex(latex(Is))
+                    
+                    st.write("**Sistema de Ecuaciones:**")
+                    st.latex(r"A \cdot i = 0 \quad \text{(KCL)}")
+                    st.latex(r"v = A^T \cdot e \quad \text{(KVL)}")
+                    st.latex(r"v = Z \cdot i + V_s \quad \text{(BR)}")
+                else:
+                    st.info("Circuito sin nodos (solo tierra)")
 
-# ----- Generar Código MATLAB (MEJORADO) -----
+# ----- Generar Código MATLAB -----
 with col3:
     if st.button("Codigo MATLAB"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes primero")
         else:
-            R, C, Vin, _, _ = analizar_circuito_rc(st.session_state.componentes)
+            R, C, Vin = analizar_circuito_rc(st.session_state.componentes)
             
-            if R and C and Vin:
+            if R is not None and C is not None and Vin is not None:
                 tau = R * C
                 matlab_code = f"""%% Circuito RC - Analisis Completo
 %% Parametros: R = {R:.2f} Ohm, C = {C:.2e} F, Vin = {Vin:.2f} V
@@ -358,7 +355,7 @@ with col3:
 
 clear; clc; close all;
 
-%% 1. Definicion de variable de estado
+%% 1. Variable de estado
 syms Vc(t)
 R = {R:.10f};
 C = {C:.10f};
@@ -372,43 +369,44 @@ eq = diff(Vc, t) + (1/tau)*Vc == Vin/tau;
 %% 3. Condicion inicial (capacitor descargado)
 cond = Vc(0) == 0;
 
-%% 4. Resolver la ecuacion diferencial
+%% 4. Solucion
 Vc_sol = dsolve(eq, cond);
 
-%% 5. Mostrar resultado analitico
+%% 5. Resultados
 disp('=== SOLUCION DEL CIRCUITO RC ===');
-disp('Variable de estado: Vc(t)');
+fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f))\\n', Vin, tau);
 pretty(Vc_sol);
-fprintf('\\nForma simplificada: Vc(t) = %.2f * (1 - exp(-t/%.4f))\\n', Vin, tau);
 
-%% 6. Parametros del sistema
-fprintf('\\n=== PARAMETROS DEL SISTEMA ===\\n');
-fprintf('Constante de tiempo tau = %.4f segundos\\n', tau);
-fprintf('Voltaje final en estado estable = %.2f V\\n', Vin);
-fprintf('Tiempo de establecimiento (5*tau) = %.4f segundos\\n', 5*tau);
+%% 6. Parametros
+fprintf('\\n=== PARAMETROS ===\\n');
+fprintf('tau = %.4f s\\n', tau);
+fprintf('Estado estable = %.2f V\\n', Vin);
+fprintf('Transitorio (5tau) = %.4f s\\n', 5*tau);
 
-%% 7. Graficar respuesta
-figure('Position', [100, 100, 900, 500]);
-fplot(Vc_sol, [0 5*tau], 'LineWidth', 2, 'Color', 'b');
-xlabel('Tiempo (s)', 'FontSize', 12);
-ylabel('Vc(t) (V)', 'FontSize', 12);
-title('Respuesta del Circuito RC - Carga del Capacitor', 'FontSize', 14);
+%% 7. Grafica
+figure;
+fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
+xlabel('t (s)'); ylabel('Vc(t) (V)');
+title('Respuesta del Circuito RC');
 grid on;
 hold on;
-plot([0 5*tau], [Vin Vin], '--r', 'LineWidth', 1.5);
+plot([0 5*tau], [Vin Vin], '--r');
 legend('Vc(t)', 'Vin', 'Location', 'best');
-
-%% 8. Interpretacion
-fprintf('\\n=== INTERPRETACION FISICA ===\\n');
-fprintf('El capacitor se carga desde 0 V hasta %.2f V\\n', Vin);
-fprintf('El regimen transitorio dura %.2f segundos (5τ)\\n', 5*tau);
 """
             else:
-                matlab_code = "%% Circuito no RC simple\nclear; clc;\n% Agregar ecuaciones manualmente\n"
+                nodos = obtener_nodos_unicos(st.session_state.componentes)
+                A, Z, Vs, Is, n_nodos, n_ramas = generar_sistema_tablueau(st.session_state.componentes, nodos)
+                
+                matlab_code = "%% Circuito General - Sistema Tablueau\nclear; clc;\n\n"
+                matlab_code += "%% Matriz de incidencia A\n"
+                matlab_code += f"A = {latex(A)};\n\n"
+                matlab_code += "%% Matriz de impedancias Z\n"
+                matlab_code += f"Z = {latex(Z)};\n\n"
+                matlab_code += "%% Resolver sistema\n% A*i = 0, v = A^T*e, v = Z*i + Vs\n"
             
             st.subheader("Codigo MATLAB Generado")
             st.code(matlab_code, language="matlab")
-            st.download_button("Descargar", data=matlab_code, file_name="circuito_rc.m")
+            st.download_button("Descargar", data=matlab_code, file_name="circuito.m")
 
 # ----- Limpiar Circuito -----
 with col4:
@@ -448,54 +446,40 @@ with col5:
                 for warn in warnings:
                     st.warning(warn)
 
-# ----- Sistema Completo -----
+# ----- Matriz de Incidencia -----
 with col6:
-    with st.expander("Sistema Completo (KCL + LVK + BR)", expanded=False):
-        if st.button("Generar Sistema Completo", key="sistema"):
+    with st.expander("Matriz de Incidencia A", expanded=False):
+        if st.button("Generar Matriz A", key="incidencia"):
             if not st.session_state.componentes:
                 st.warning("Agrega componentes")
             else:
-                R, C, Vin, _, _ = analizar_circuito_rc(st.session_state.componentes)
-                if R and C and Vin:
-                    st.write("### Sistema de Ecuaciones del Circuito RC")
-                    st.write("")
-                    st.write("**KCL:**")
-                    st.latex(r"i_R = i_C")
-                    st.write("")
-                    st.write("**LVK:**")
-                    st.latex(r"V_{in} - V_R - V_C = 0")
-                    st.write("")
-                    st.write("**BR:**")
-                    st.latex(r"V_R = R \cdot i_R")
-                    st.latex(r"i_C = C \cdot \frac{dV_C}{dt}")
-                    st.write("")
-                    st.write("**Sistema Reducido:**")
-                    st.latex(r"\frac{V_{in} - V_C}{R} = C \cdot \frac{dV_C}{dt}")
-                    st.latex(r"\frac{dV_C}{dt} + \frac{1}{RC} V_C = \frac{V_{in}}{RC}")
-                else:
-                    st.info("Circuito no reconocido como RC serie simple")
+                nodos = obtener_nodos_unicos(st.session_state.componentes)
+                A, nodos_nt = generar_matriz_incidencia(st.session_state.componentes, nodos)
+                st.write(f"**Matriz de Incidencia A** ({len(nodos_nt)} nodos x {len(st.session_state.componentes)} ramas)")
+                st.latex(latex(A))
+                st.caption("Filas: nodos (excepto N0) | Columnas: ramas (componentes)")
+                st.caption("+1: corriente sale del nodo | -1: corriente entra al nodo")
 
-# ----- Analisis Nodal -----
+# ----- Sistema Tablueau -----
 with col7:
-    with st.expander("Analisis Nodal (Matriz G)", expanded=False):
-        if st.button("Ejecutar Analisis Nodal", key="nodal2"):
+    with st.expander("Sistema Tablueau (M·x = b)", expanded=False):
+        if st.button("Generar Sistema Tablueau", key="tablueau"):
             if not st.session_state.componentes:
                 st.warning("Agrega componentes")
             else:
-                R, C, Vin, _, _ = analizar_circuito_rc(st.session_state.componentes)
-                if R and C and Vin:
-                    st.write("### Analisis Nodal (Metodo de Supernodo)")
-                    st.write("")
-                    st.write("**Matriz de Conductancias G:**")
-                    st.latex(r"G = \begin{bmatrix} \frac{1}{R} & -\frac{1}{R} \\ -\frac{1}{R} & \frac{1}{R} \end{bmatrix}")
-                    st.write("**Vector de Corrientes I:**")
-                    st.latex(r"I = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
-                    st.write("")
-                    st.write("**Nota:** La fuente de voltaje requiere un supernodo. El sistema se resuelve con:")
-                    st.latex(r"V_{N1} = V_{in}")
-                    st.latex(r"\frac{V_{N1} - V_{N2}}{R} = C \cdot \frac{dV_{N2}}{dt}")
-                else:
-                    st.info("Analisis nodal optimizado para circuitos RC serie")
+                nodos = obtener_nodos_unicos(st.session_state.componentes)
+                A, Z, Vs, Is, n_nodos, n_ramas = generar_sistema_tablueau(st.session_state.componentes, nodos)
+                
+                st.write("**Sistema M·x = b**")
+                st.write("")
+                st.write("**KCL:** A·i = 0")
+                st.latex(latex(A) + r" \cdot i = 0")
+                st.write("")
+                st.write("**KVL:** v = Aᵀ·e")
+                st.latex(r"v = " + latex(A.T) + r" \cdot e")
+                st.write("")
+                st.write("**BR:** v = Z·i + Vs")
+                st.latex(r"v = " + latex(Z) + r" \cdot i + " + latex(Vs))
 
 # ---------- INFORMACION ADICIONAL ----------
 with st.sidebar.expander("Instrucciones"):
@@ -504,7 +488,7 @@ with st.sidebar.expander("Instrucciones"):
     1. **Nodo N0**: Usa N0 como tierra
     2. **Agrega componentes**: Completa todos los campos
     3. **Mostrar Grafo**: Visualiza polaridad y direcciones
-    4. **Generar Ecuaciones**: Obtiene analisis completo (KCL, LVK, BR, ecuacion diferencial)
+    4. **Generar Ecuaciones**: Obtiene analisis completo con forma matricial
     5. **MATLAB**: Descarga codigo optimizado
     
     ### Ejemplo Circuito RC:
@@ -514,10 +498,9 @@ with st.sidebar.expander("Instrucciones"):
     | R1 | Resistencia | N1 | N2 | 27k |
     | C1 | Capacitor | N2 | N0 | 100u |
     
-    ### Mejoras incluidas:
-    - ✅ LVK explicito
-    - ✅ Variable de estado definida
-    - ✅ Ecuacion diferencial en forma estandar
-    - ✅ Interpretacion fisica
-    - ✅ Analisis nodal con supernodo
+    ### Forma Matricial (Tablueau):
+    - **A**: Matriz de incidencia (nodos x ramas)
+    - **Z**: Matriz de impedancias
+    - **Vs/Is**: Vectores de fuentes
+    - **Sistema**: A·i = 0, v = Aᵀ·e, v = Z·i + Vs
     """)
