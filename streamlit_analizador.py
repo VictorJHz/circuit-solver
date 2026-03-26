@@ -24,18 +24,18 @@ componentes_disponibles = {
 }
 
 prefijos = {"": 1, "p": 1e-12, "n": 1e-9, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
-prefijos_regex = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
 # ---------- FUNCIONES NETLIST ----------
 def parse_valor(valor_str):
+    """Parsea valores como 9, 27k, 100u, 2.2M"""
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
-    # Quitar palabras como dc, ac
-    valor_str = re.sub(r'[a-z]+', '', valor_str)
-    match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
+    # Eliminar palabras como dc, ac pero mantener prefijos
+    # Primero extraer el numero con posible prefijo
+    match = re.match(r'^([\d\.]+)([pnumkM]?)(.*)$', valor_str)
     if match:
-        num_str, pref = match.groups()
+        num_str, pref, resto = match.groups()
         try:
             num = float(num_str)
         except:
@@ -83,15 +83,15 @@ def parsear_netlist(texto):
             
         parts = line.split()
         if len(parts) < 4:
-            errores.append(f"Linea {line_num}: Formato incorrecto")
+            errores.append(f"Linea {line_num}: Formato incorrecto (minimo 4 campos)")
             continue
         
         # El primer campo es el nombre del componente (V1, R1, C1)
         nombre = parts[0]
-        letra = nombre[0]
+        letra = nombre[0].upper()
         
         if letra not in tipo_por_letra:
-            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
+            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido (use V, R, C, L, I)")
             continue
         
         tipo = tipo_por_letra[letra]
@@ -103,6 +103,7 @@ def parsear_netlist(texto):
         # Buscar el valor (puede estar en pos 3 o 4 si hay DC/AC)
         valor_str = None
         for i in range(3, len(parts)):
+            # Buscar algo que parezca un numero (con o sin prefijo)
             if re.search(r'[\d\.]', parts[i]):
                 valor_str = parts[i]
                 break
@@ -117,7 +118,8 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
             continue
         
-        mult = prefijos_regex.get(prefijo, 1)
+        # Obtener el valor base para mostrar
+        mult = prefijos.get(prefijo, 1)
         valor_base = valor_total / mult if mult != 1 else valor_total
         
         componentes.append({
@@ -146,7 +148,7 @@ with st.sidebar.form(key='form_componente', clear_on_submit=True):
     tipo = st.selectbox("Tipo", list(componentes_disponibles.keys()))
     col_val, col_pref = st.columns([3,1])
     with col_val:
-        valor = st.text_input("Valor")
+        valor = st.text_input("Valor (numero)")
     with col_pref:
         pref = st.selectbox("Prefijo", list(prefijos.keys()), index=0)
     submit = st.form_submit_button("Agregar")
@@ -167,14 +169,14 @@ if submit:
             })
             st.sidebar.success(f"Agregado {nombre}")
             st.rerun()
-        except:
-            st.sidebar.error("Valor numerico invalido")
+        except ValueError:
+            st.sidebar.error("El valor debe ser un numero")
 
 # ---------- NETLIST ----------
 st.sidebar.divider()
 st.sidebar.header("Netlist")
 with st.sidebar.expander("Cargar desde Netlist", expanded=False):
-    st.markdown("Formato: V1 N0 N1 9   o   R1 N1 N2 27k")
+    st.markdown("**Formato:** V1 N0 N1 9   o   R1 N1 N2 27k")
     netlist = st.text_area("Pega el netlist:", height=120, 
                           placeholder="V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u")
     
@@ -190,8 +192,10 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
                     for c in nuevos:
                         if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                             st.session_state.componentes.append(c)
-                            st.sidebar.success(f"Agregado {c['nombre']}")
+                            st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
                     st.rerun()
+                elif not errores:
+                    st.sidebar.warning("No se encontraron componentes")
             else:
                 st.sidebar.warning("Netlist vacio")
     
@@ -224,7 +228,7 @@ if st.session_state.componentes:
 else:
     st.info("Sin componentes. Agrega individualmente o con netlist.")
 
-# ---------- FUNCIONES ----------
+# ---------- FUNCIONES DE ANALISIS ----------
 def obtener_nodos(cs):
     nodos = set()
     for c in cs:
@@ -285,37 +289,83 @@ with b2:
             st.warning("Agrega componentes")
         else:
             R, C, Vin = analizar_rc(st.session_state.componentes)
-            if R and C and Vin:
-                tau = R*C
-                st.subheader("Circuito RC")
+            if R is not None and C is not None and Vin is not None:
+                tau = R * C
+                st.subheader("Analisis Completo del Circuito RC")
+                
+                st.write("**1. Matriz de Incidencia A**")
                 st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+                
+                st.write("**2. Vector e (Potenciales nodales)**")
                 st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
-                st.latex(r"i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}")
-                st.latex(r"v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
-                st.latex(r"v_{V1}=V_{in},\quad v_{R1}=R i_{R1},\quad i_{C1}=C\frac{dv_{C1}}{dt}")
+                
+                st.write("**3. KCL en forma matricial**")
+                st.latex(r"A \cdot i = 0")
+                st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
+                
+                st.write("**4. KVL en forma matricial**")
+                st.latex(r"v = A^T \cdot e")
+                st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+                
+                st.write("**5. Relaciones de los Componentes (BR)**")
+                st.latex(r"v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
+                st.latex(r"v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
+                st.latex(r"i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
+                
+                st.write("**6. Ecuacion Diferencial**")
+                st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
                 st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
-                st.latex(rf"V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})")
+                
+                st.write("**7. Variable de Estado**")
+                st.latex(r"x(t) = V_C(t)")
+                
+                st.write("**8. Ecuacion de Estado**")
+                st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
+                
+                st.write("**9. Solucion Analitica**")
+                st.latex(rf"V_C(t) = {Vin:.1f} \cdot (1 - e^{{-t/{tau:.4f}}})")
             else:
-                st.info("Circuito no RC simple")
+                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para ver el analisis completo.")
 
 with b3:
     if st.button("Codigo MATLAB", key="matlab"):
         R, C, Vin = analizar_rc(st.session_state.componentes)
-        if R and C and Vin:
-            tau = R*C
-            code = f"""% Circuito RC
-clear; clc;
+        if R is not None and C is not None and Vin is not None:
+            tau = R * C
+            code = f"""% Circuito RC - Analisis Completo
+clear; clc; close all;
+
+% Parametros
+R = {R:.6f};  % Ohm
+C = {C:.6f};  % Faradios
+Vin = {Vin:.6f};  % Voltios
+tau = R * C;  % Constante de tiempo
+
+% Variable de estado
 syms Vc(t)
-R={R:.6f}; C={C:.6f}; Vin={Vin:.6f}; tau=R*C;
-eq = diff(Vc,t) == -1/tau*Vc + Vin/tau;
-cond = Vc(0)==0;
-Vc_sol = dsolve(eq,cond);
-fplot(Vc_sol, [0 5*tau])
-xlabel('t(s)'); ylabel('Vc(V)')
-grid on
+eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
+cond = Vc(0) == 0;
+Vc_sol = dsolve(eq, cond);
+
+% Resultados
+disp('=== SOLUCION DEL CIRCUITO RC ===');
+fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f))\\n', Vin, tau);
+pretty(Vc_sol);
+
+% Grafica
+figure;
+fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
+xlabel('t (s)'); ylabel('Vc(t) (V)');
+title('Respuesta del Circuito RC');
+grid on;
+hold on;
+plot([0 5*tau], [Vin Vin], '--r');
+legend('Vc(t)', 'Vin', 'Location', 'best');
 """
             st.code(code, language="matlab")
-            st.download_button("Descargar", code, "circuito.m", key="descargar_matlab")
+            st.download_button("Descargar", code, "circuito_rc.m", key="descargar_matlab")
+        else:
+            st.info("Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para generar el codigo MATLAB.")
 
 with b4:
     if st.button("Limpiar Todo", key="limpiar_todo"):
