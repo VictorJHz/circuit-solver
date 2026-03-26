@@ -31,6 +31,8 @@ def parse_valor(valor_str):
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
+    # Quitar palabras como dc, ac
+    valor_str = re.sub(r'[a-z]+', '', valor_str)
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
         num_str, pref = match.groups()
@@ -84,39 +86,29 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: Formato incorrecto")
             continue
         
-        # El primer campo es como "V1", "R1", "C1", etc.
-        nombre_completo = parts[0]
+        # El primer campo es el nombre del componente (V1, R1, C1)
+        nombre = parts[0]
+        letra = nombre[0]
         
-        # La primera letra indica el tipo
-        letra = nombre_completo[0]
         if letra not in tipo_por_letra:
             errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
             continue
         
         tipo = tipo_por_letra[letra]
-        nombre = nombre_completo  # Usar el nombre completo como identificador
         
-        # Los nodos estan en las posiciones 1 y 2
-        nodo_origen = parts[1] if len(parts) > 1 else None
-        nodo_destino = parts[2] if len(parts) > 2 else None
+        # Nodos
+        nodo_origen = parts[1]
+        nodo_destino = parts[2]
         
-        # El valor puede estar en posicion 3 o 4 (si hay DC/AC)
+        # Buscar el valor (puede estar en pos 3 o 4 si hay DC/AC)
         valor_str = None
-        # Buscar desde la posicion 3 hasta el final
         for i in range(3, len(parts)):
-            p = parts[i]
-            # Si parece un valor (tiene numeros o prefijos)
-            if re.search(r'[\d\.]+[pnumkM]?', p):
-                valor_str = p
+            if re.search(r'[\d\.]', parts[i]):
+                valor_str = parts[i]
                 break
         
         if not valor_str:
             errores.append(f"Linea {line_num}: No se encontro valor")
-            continue
-        
-        # Validar nodos
-        if not nodo_origen or not nodo_destino:
-            errores.append(f"Linea {line_num}: Faltan nodos")
             continue
         
         # Parsear valor
@@ -125,7 +117,6 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
             continue
         
-        # Calcular valor base (sin prefijo para mostrar)
         mult = prefijos_regex.get(prefijo, 1)
         valor_base = valor_total / mult if mult != 1 else valor_total
         
@@ -143,9 +134,6 @@ def parsear_netlist(texto):
             "nodo_destino": nodo_destino,
             "needs_current": componentes_disponibles[tipo]["needs_current"]
         })
-        
-        # Debug para ver que se agregó
-        st.sidebar.write(f"DEBUG: Agregado {nombre} tipo {tipo} valor {valor_total} {nodo_origen}->{nodo_destino}")
     
     return componentes, errores
 
@@ -185,8 +173,8 @@ if submit:
 # ---------- NETLIST ----------
 st.sidebar.divider()
 st.sidebar.header("Netlist")
-with st.sidebar.expander("Cargar desde Netlist", expanded=True):
-    st.markdown("**Formato:** V1 N0 N1 9  o  R1 N1 N2 27k")
+with st.sidebar.expander("Cargar desde Netlist", expanded=False):
+    st.markdown("Formato: V1 N0 N1 9   o   R1 N1 N2 27k")
     netlist = st.text_area("Pega el netlist:", height=120, 
                           placeholder="V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u")
     
@@ -202,10 +190,8 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=True):
                     for c in nuevos:
                         if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                             st.session_state.componentes.append(c)
-                            st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
+                            st.sidebar.success(f"Agregado {c['nombre']}")
                     st.rerun()
-                elif not errores:
-                    st.sidebar.warning("No se encontraron componentes")
             else:
                 st.sidebar.warning("Netlist vacio")
     
@@ -213,13 +199,9 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=True):
         if st.button("Ejemplo RC", key="ejemplo_rc", use_container_width=True):
             ejemplo = "V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u"
             nuevos, errores = parsear_netlist(ejemplo)
-            if errores:
-                for err in errores:
-                    st.sidebar.error(err)
             for c in nuevos:
                 if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                     st.session_state.componentes.append(c)
-                    st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
             st.rerun()
 
 # ---------- MOSTRAR COMPONENTES ----------
