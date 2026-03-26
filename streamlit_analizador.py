@@ -31,6 +31,8 @@ def parse_valor(valor_str):
     if not valor_str:
         return None
     valor_str = valor_str.strip().lower()
+    # Eliminar DC, AC, etc si existen
+    valor_str = valor_str.split()[0] if ' ' in valor_str else valor_str
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
         num, pref = match.groups()
@@ -56,62 +58,75 @@ def parse_valor(valor_str):
 def parsear_netlist(texto):
     componentes = []
     errores = []
-    alias_map = {
-        'R': 'Resistencia', 'RES': 'Resistencia', 'RESISTOR': 'Resistencia',
-        'C': 'Capacitor', 'CAP': 'Capacitor', 'CAPACITOR': 'Capacitor',
-        'L': 'Inductor', 'IND': 'Inductor', 'INDUCTOR': 'Inductor',
-        'V': 'Fuente de Voltaje', 'VOLTAGE': 'Fuente de Voltaje', 'VS': 'Fuente de Voltaje',
-        'I': 'Fuente de Corriente', 'CURRENT': 'Fuente de Corriente', 'IS': 'Fuente de Corriente'
+    
+    tipo_por_letra = {
+        'V': 'Fuente de Voltaje',
+        'I': 'Fuente de Corriente',
+        'R': 'Resistencia',
+        'C': 'Capacitor',
+        'L': 'Inductor'
     }
     
     for line_num, line in enumerate(texto.strip().split('\n'), 1):
         line = line.strip()
         if not line or line.startswith('#') or line.startswith(';'):
             continue
+        
         parts = line.split()
         if len(parts) < 4:
             errores.append(f"Linea {line_num}: Formato incorrecto")
             continue
         
-        tipo_key = parts[0].upper()
-        tipo = alias_map.get(tipo_key, None)
-        if tipo is None:
-            for t in componentes_disponibles:
-                if t.upper() == tipo_key:
-                    tipo = t
-                    break
-        if not tipo:
-            errores.append(f"Linea {line_num}: Tipo '{parts[0]}' no reconocido")
-            continue
+        primero = parts[0]
         
-        nombre = parts[1] if len(parts) > 1 else None
-        n1 = parts[2] if len(parts) > 2 else None
-        n2 = parts[3] if len(parts) > 3 else None
-        val_str = parts[4] if len(parts) > 4 else None
+        if primero[0] in tipo_por_letra:
+            letra = primero[0]
+            nombre = primero[1:] if len(primero) > 1 else primero
+            tipo = tipo_por_letra[letra]
+            nodo_origen = parts[1] if len(parts) > 1 else None
+            nodo_destino = parts[2] if len(parts) > 2 else None
+            valor_str = parts[3] if len(parts) > 3 else None
+        else:
+            letra = parts[0]
+            if letra not in tipo_por_letra:
+                errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
+                continue
+            tipo = tipo_por_letra[letra]
+            nombre = parts[1] if len(parts) > 1 else None
+            nodo_origen = parts[2] if len(parts) > 2 else None
+            nodo_destino = parts[3] if len(parts) > 3 else None
+            valor_str = parts[4] if len(parts) > 4 else None
         
-        if not nombre or not n1 or not n2 or not val_str:
+        if not nombre or not nodo_origen or not nodo_destino or not valor_str:
             errores.append(f"Linea {line_num}: Faltan campos")
             continue
         
-        valor = parse_valor(val_str)
+        valor = parse_valor(valor_str)
         if valor is None:
-            errores.append(f"Linea {line_num}: Valor invalido '{val_str}'")
+            errores.append(f"Linea {line_num}: Valor invalido")
             continue
         
-        pref = ""
+        prefijo = ""
         for p in prefijos_regex:
-            if p and val_str.endswith(p):
-                pref = p
+            if p and valor_str.endswith(p):
+                prefijo = p
                 break
         
         componentes.append({
-            "nombre": nombre, "tipo": tipo, "tipo_corto": componentes_disponibles[tipo]["tipo"],
+            "nombre": nombre,
+            "tipo": tipo,
+            "tipo_corto": componentes_disponibles[tipo]["tipo"],
             "tipo_elec": componentes_disponibles[tipo]["tipo_elec"],
-            "unidad": componentes_disponibles[tipo]["unidad"], "valor": valor / prefijos_regex.get(pref,1),
-            "prefijo": pref, "multiplo": prefijos_regex.get(pref,1), "valor_total": valor,
-            "nodo_origen": n1, "nodo_destino": n2,
+            "unidad": componentes_disponibles[tipo]["unidad"],
+            "valor": valor / prefijos_regex.get(prefijo, 1) if prefijo else valor,
+            "prefijo": prefijo,
+            "multiplo": prefijos_regex.get(prefijo, 1),
+            "valor_total": valor,
+            "nodo_origen": nodo_origen,
+            "nodo_destino": nodo_destino,
             "needs_current": componentes_disponibles[tipo]["needs_current"]
         })
+    
     return componentes, errores
 
 # ---------- FORMULARIO INDIVIDUAL ----------
@@ -151,7 +166,7 @@ st.sidebar.divider()
 st.sidebar.header("Netlist")
 with st.sidebar.expander("Cargar desde Netlist"):
     netlist = st.text_area("Pega el netlist:", height=120)
-    if st.button("Cargar", use_container_width=True):
+    if st.button("Cargar Netlist", key="cargar_netlist", use_container_width=True):
         if netlist.strip():
             nuevos, errores = parsear_netlist(netlist)
             for err in errores:
@@ -160,15 +175,19 @@ with st.sidebar.expander("Cargar desde Netlist"):
                 if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                     st.session_state.componentes.append(c)
                     st.sidebar.success(f"Agregado {c['nombre']}")
+            st.rerun()
         else:
             st.sidebar.warning("Netlist vacio")
 
 # ---------- MOSTRAR COMPONENTES ----------
 st.subheader("Componentes")
 if st.session_state.componentes:
-    if st.button("Limpiar Todo"):
-        st.session_state.componentes = []
-        st.rerun()
+    col_clear1, col_clear2 = st.columns([4, 1])
+    with col_clear2:
+        if st.button("Limpiar Todos", key="clear_all"):
+            st.session_state.componentes = []
+            st.rerun()
+    
     for i, c in enumerate(st.session_state.componentes):
         col1, col2 = st.columns([4,1])
         with col1:
@@ -211,12 +230,12 @@ def dibujar_grafo(cs):
         G.add_edge(c['nodo_origen'], c['nodo_destino'], label=label, color=color)
     return G
 
-# ---------- BOTONES ----------
+# ---------- BOTONES PRINCIPALES ----------
 st.subheader("Acciones")
 b1, b2, b3, b4 = st.columns(4)
 
 with b1:
-    if st.button("Mostrar Grafo"):
+    if st.button("Mostrar Grafo", key="mostrar_grafo"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
@@ -233,7 +252,7 @@ with b1:
             st.pyplot(fig)
 
 with b2:
-    if st.button("Generar Ecuaciones"):
+    if st.button("Generar Ecuaciones", key="generar_eq"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
@@ -252,7 +271,7 @@ with b2:
                 st.info("Circuito no RC simple")
 
 with b3:
-    if st.button("Codigo MATLAB"):
+    if st.button("Codigo MATLAB", key="matlab"):
         R, C, Vin = analizar_rc(st.session_state.componentes)
         if R and C and Vin:
             tau = R*C
@@ -268,10 +287,10 @@ xlabel('t(s)'); ylabel('Vc(V)')
 grid on
 """
             st.code(code, language="matlab")
-            st.download_button("Descargar", code, "circuito.m")
+            st.download_button("Descargar", code, "circuito.m", key="descargar_matlab")
 
 with b4:
-    if st.button("Limpiar Todo"):
+    if st.button("Limpiar Todo", key="limpiar_todo"):
         st.session_state.componentes = []
         st.rerun()
 
@@ -279,9 +298,3 @@ with b4:
 with st.sidebar.expander("Instrucciones"):
     st.markdown("""
     **Netlist formato:**
-    - V N0 N1 9
-    - R N1 N2 27k
-    - C N2 N0 100u
-    
-    **N0 es tierra**
-    """)
