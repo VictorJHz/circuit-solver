@@ -1,7 +1,7 @@
 import streamlit as st
 import networkx as nx
 import matplotlib.pyplot as plt
-from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify
+from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify, eye
 import numpy as np
 import re
 import pandas as pd
@@ -9,7 +9,7 @@ import pandas as pd
 # ---------- CONFIGURACIÓN ----------
 st.set_page_config(page_title="Circuit Solver", layout="wide")
 st.title("⚡ Circuit Solver")
-st.caption("Analizador general de circuitos eléctricos - Método de Tableau")
+st.caption("Analizador universal de circuitos eléctricos - Modified Nodal Analysis (MNA)")
 
 # ---------- SESSION STATE ----------
 if 'componentes' not in st.session_state:
@@ -243,6 +243,384 @@ def clasificar_circuito(componentes):
     else:
         return "Estático", "Resistivo", 0
 
+def construir_sistema_mna(componentes, nodos):
+    """
+    Construye el sistema MNA completo:
+    [G   B] [V]   [I]
+    [B^T 0] [Iv] = [E]
+    """
+    nodos_no_tierra = [n for n in nodos if n != "N0"]
+    n_nodos = len(nodos_no_tierra)
+    
+    # Identificar fuentes de voltaje
+    fuentes_v = [c for c in componentes if c['tipo'] == "Fuente de Voltaje"]
+    m = len(fuentes_v)
+    
+    # Mapeo de nodos a índices
+    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
+    
+    # Tamaño del sistema MNA: n_nodos + m
+    N = n_nodos + m
+    
+    # Inicializar matrices
+    G = zeros(n_nodos, n_nodos)  # Matriz de conductancias
+    B = zeros(n_nodos, m)        # Matriz de incidencia de fuentes de voltaje
+    I = zeros(n_nodos, 1)        # Vector de corrientes (fuentes de corriente)
+    E = zeros(m, 1)              # Vector de voltajes de fuentes
+    
+    # ========== 1. PROCESAR RESISTENCIAS ==========
+    for c in componentes:
+        if c['tipo'] == "Resistencia":
+            G_val = 1 / c['valor_total']
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            
+            if nodo_o != "N0" and nodo_d != "N0":
+                i = nodo_idx[nodo_o]
+                j = nodo_idx[nodo_d]
+                G[i, i] += G_val
+                G[j, j] += G_val
+                G[i, j] -= G_val
+                G[j, i] -= G_val
+            elif nodo_o != "N0":
+                i = nodo_idx[nodo_o]
+                G[i, i] += G_val
+            elif nodo_d != "N0":
+                i = nodo_idx[nodo_d]
+                G[i, i] += G_val
+    
+    # ========== 2. PROCESAR FUENTES DE CORRIENTE ==========
+    for c in componentes:
+        if c['tipo'] == "Fuente de Corriente":
+            I_val = c['valor_total']
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            
+            # Convención: corriente fluye de nodo_origen → nodo_destino
+            if nodo_o != "N0":
+                I[nodo_idx[nodo_o], 0] -= I_val  # Sale del nodo → negativo
+            if nodo_d != "N0":
+                I[nodo_idx[nodo_d], 0] += I_val  # Entra al nodo → positivo
+    
+    # ========== 3. PROCESAR FUENTES DE VOLTAJE ==========
+    for idx_v, c in enumerate(fuentes_v):
+        nodo_o = c['nodo_origen']
+        nodo_d = c['nodo_destino']
+        V_val = c['valor_total']
+        
+        # Vector E: voltaje de la fuente
+        E[idx_v, 0] = V_val
+        
+        # Matriz B: incidencia de la fuente
+        if nodo_o != "N0":
+            B[nodo_idx[nodo_o], idx_v] = 1   # Corriente sale del nodo origen
+        if nodo_d != "N0":
+            B[nodo_idx[nodo_d], idx_v] = -1  # Corriente entra al nodo destino
+    
+    # ========== 4. CONSTRUIR SISTEMA MNA ==========
+    # Matriz superior izquierda: [G, B]
+    top_left = G.row_join(B)
+    
+    # Matriz inferior izquierda: [B^T, 0]
+    bottom_left = B.T.row_join(zeros(m, m))
+    
+    # Matriz completa M
+    M = top_left.col_join(bottom_left)
+    
+    # Vector de fuentes
+    b = I.col_join(E)
+    
+    return M, b, n_nodos, m, fuentes_v
+
+def resolver_mna(M, b):
+    """Resuelve el sistema MNA y retorna los resultados"""
+    try:
+        if M.det() != 0:
+            sol = M.inv() * b
+            return sol, None
+        else:
+            return None, "La matriz MNA es singular (circuito mal definido)"
+    except Exception as e:
+        return None, str(e)
+
+def generar_reporte_estatico_mna(componentes):
+    """Genera reporte para circuitos estáticos usando MNA"""
+    st.subheader("📐 Análisis de Circuito Estático - Modified Nodal Analysis (MNA)")
+    
+    st.write("**Componentes detectados:**")
+    for c in componentes:
+        st.write(f"- {c['nombre']}: {c['tipo']} = {c['valor']}{c['prefijo']}{c['unidad']}")
+    
+    nodos = obtener_nodos(componentes)
+    nodos_no_tierra = [n for n in nodos if n != "N0"]
+    
+    # Construir sistema MNA
+    M, b, n_nodos, m, fuentes_v = construir_sistema_mna(componentes, nodos)
+    
+    st.write(f"**Nodos:** {nodos_no_tierra} (N0 = tierra)")
+    st.write(f"**Fuentes de voltaje:** {len(fuentes_v)}")
+    st.write(f"**Tamaño del sistema MNA:** {M.shape[0]} × {M.shape[1]}")
+    
+    # Mostrar matrices
+    with st.expander("📊 Matrices del Sistema MNA"):
+        st.write("**Matriz M = [G, B; B^T, 0]**")
+        st.latex(latex(M))
+        st.write("**Vector b = [I; E]**")
+        st.latex(latex(b))
+    
+    # Resolver
+    sol, error = resolver_mna(M, b)
+    
+    if error:
+        st.error(f"Error al resolver: {error}")
+        return
+    
+    # Extraer resultados
+    voltajes = {}
+    for i, nodo in enumerate(nodos_no_tierra):
+        voltajes[nodo] = float(sol[i, 0])
+    
+    corrientes_fuentes_v = {}
+    for i, fv in enumerate(fuentes_v):
+        corrientes_fuentes_v[fv['nombre']] = float(sol[n_nodos + i, 0])
+    
+    # ========== PARTE 1: RESULTADOS ==========
+    st.markdown("### 📖 Resultados")
+    
+    # Voltajes nodales
+    st.write("**Voltajes nodales:**")
+    voltajes_df = pd.DataFrame([
+        {"Nodo": nodo, "Voltaje [V]": f"{v:.4f}"}
+        for nodo, v in voltajes.items()
+    ])
+    st.dataframe(voltajes_df, use_container_width=True, hide_index=True)
+    
+    # Corrientes en fuentes de voltaje
+    if corrientes_fuentes_v:
+        st.write("**Corrientes en fuentes de voltaje:**")
+        corrientes_fv_df = pd.DataFrame([
+            {"Fuente": nombre, "Corriente [A]": f"{i:.4f}"}
+            for nombre, i in corrientes_fuentes_v.items()
+        ])
+        st.dataframe(corrientes_fv_df, use_container_width=True, hide_index=True)
+    
+    # ========== PARTE 2: CORRIENTES EN RESISTENCIAS ==========
+    st.markdown("### 🔄 Corrientes en Ramas")
+    
+    corrientes_data = []
+    for c in componentes:
+        if c['tipo'] == "Resistencia":
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            v_o = voltajes.get(nodo_o, 0)
+            v_d = voltajes.get(nodo_d, 0)
+            R = c['valor_total']
+            i_libro = (v_o - v_d) / R
+            
+            if i_libro > 0:
+                direccion = f"{nodo_o} → {nodo_d}"
+            elif i_libro < 0:
+                direccion = f"{nodo_d} → {nodo_o}"
+            else:
+                direccion = "Cero"
+            
+            corrientes_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Corriente [A]": f"{i_libro:.4f}",
+                "Dirección": direccion
+            })
+        elif c['tipo'] == "Fuente de Corriente":
+            I_val = c['valor_total']
+            if c['nodo_origen'] != "N0" and c['nodo_destino'] != "N0":
+                direccion = f"{c['nodo_origen']} → {c['nodo_destino']}"
+            elif c['nodo_origen'] != "N0":
+                direccion = f"{c['nodo_origen']} → N0"
+            else:
+                direccion = f"N0 → {c['nodo_destino']}"
+            
+            corrientes_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Corriente [A]": f"{I_val:.4f}",
+                "Dirección": direccion
+            })
+        elif c['tipo'] == "Fuente de Voltaje":
+            I_val = corrientes_fuentes_v.get(c['nombre'], 0)
+            if c['nodo_origen'] != "N0" and c['nodo_destino'] != "N0":
+                direccion = f"{c['nodo_origen']} → {c['nodo_destino']}"
+            elif c['nodo_origen'] != "N0":
+                direccion = f"{c['nodo_origen']} → N0"
+            else:
+                direccion = f"N0 → {c['nodo_destino']}"
+            
+            corrientes_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Corriente [A]": f"{I_val:.4f}",
+                "Dirección": direccion
+            })
+    
+    if corrientes_data:
+        corrientes_df = pd.DataFrame(corrientes_data)
+        st.dataframe(corrientes_df, use_container_width=True, hide_index=True)
+    
+    # ========== PARTE 3: VALIDACIÓN KCL ==========
+    st.markdown("### ✅ Validación KCL")
+    st.caption("KCL: Suma de corrientes que entran al nodo = 0")
+    
+    kcl_data = []
+    tolerancia = 1e-6
+    for nodo in nodos_no_tierra:
+        suma = 0
+        for c in componentes:
+            if c['tipo'] == "Resistencia":
+                nodo_o = c['nodo_origen']
+                nodo_d = c['nodo_destino']
+                v_o = voltajes.get(nodo_o, 0)
+                v_d = voltajes.get(nodo_d, 0)
+                R = c['valor_total']
+                i = (v_o - v_d) / R
+                
+                if nodo_o == nodo:
+                    suma -= i  # Sale → negativo
+                elif nodo_d == nodo:
+                    suma += i  # Entra → positivo
+            
+            elif c['tipo'] == "Fuente de Corriente":
+                I_val = c['valor_total']
+                nodo_o = c['nodo_origen']
+                nodo_d = c['nodo_destino']
+                
+                if nodo_o == nodo:
+                    suma -= I_val
+                elif nodo_d == nodo:
+                    suma += I_val
+            
+            elif c['tipo'] == "Fuente de Voltaje":
+                I_val = corrientes_fuentes_v.get(c['nombre'], 0)
+                nodo_o = c['nodo_origen']
+                nodo_d = c['nodo_destino']
+                
+                if nodo_o == nodo:
+                    suma -= I_val
+                elif nodo_d == nodo:
+                    suma += I_val
+        
+        if abs(suma) < tolerancia:
+            status = "✅ Satisfecha"
+        else:
+            status = "❌ No satisfecha"
+        
+        kcl_data.append({
+            "Nodo": nodo,
+            "Suma Corrientes [A]": f"{suma:.2e}",
+            "Estado": status
+        })
+    
+    if kcl_data:
+        kcl_df = pd.DataFrame(kcl_data)
+        st.dataframe(kcl_df, use_container_width=True, hide_index=True)
+    
+    # ========== PARTE 4: POTENCIAS ==========
+    st.markdown("### ⚡ Potencias en Elementos")
+    
+    potencias_data = []
+    for c in componentes:
+        if c['tipo'] == "Resistencia":
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            v_o = voltajes.get(nodo_o, 0)
+            v_d = voltajes.get(nodo_d, 0)
+            v = v_o - v_d
+            i = v / c['valor_total']
+            P = v * i
+            
+            if P < 0:
+                P = -P
+                v = abs(v)
+                i = abs(i)
+            
+            potencias_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Voltaje [V]": f"{v:.4f}",
+                "Corriente [A]": f"{i:.4f}",
+                "Potencia [W]": f"{P:.4f}",
+                "Comportamiento": "🔋 Disipa"
+            })
+        
+        elif c['tipo'] == "Fuente de Corriente":
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            v_o = voltajes.get(nodo_o, 0)
+            v_d = voltajes.get(nodo_d, 0)
+            v = v_o - v_d
+            I_val = c['valor_total']
+            P = v * I_val
+            
+            if P > 0:
+                comportamiento = "⚡ Entrega"
+            else:
+                comportamiento = "🔋 Absorbe"
+            
+            potencias_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Voltaje [V]": f"{v:.4f}",
+                "Corriente [A]": f"{I_val:.4f}",
+                "Potencia [W]": f"{P:.4f}",
+                "Comportamiento": comportamiento
+            })
+        
+        elif c['tipo'] == "Fuente de Voltaje":
+            nodo_o = c['nodo_origen']
+            nodo_d = c['nodo_destino']
+            v_o = voltajes.get(nodo_o, 0)
+            v_d = voltajes.get(nodo_d, 0)
+            v = v_o - v_d
+            I_val = corrientes_fuentes_v.get(c['nombre'], 0)
+            P = v * I_val
+            
+            if P > 0:
+                comportamiento = "⚡ Entrega"
+            else:
+                comportamiento = "🔋 Absorbe"
+            
+            potencias_data.append({
+                "Elemento": c['nombre'],
+                "Tipo": c['tipo'],
+                "Voltaje [V]": f"{v:.4f}",
+                "Corriente [A]": f"{I_val:.4f}",
+                "Potencia [W]": f"{P:.4f}",
+                "Comportamiento": comportamiento
+            })
+    
+    if potencias_data:
+        potencias_df = pd.DataFrame(potencias_data)
+        st.dataframe(potencias_df, use_container_width=True, hide_index=True)
+    
+    # ========== PARTE 5: BALANCE DE POTENCIA ==========
+    st.markdown("### ⚖️ Balance de Potencia")
+    
+    potencia_total_disipada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Disipa" in p["Comportamiento"])
+    potencia_total_entregada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Entrega" in p["Comportamiento"])
+    potencia_total_absorbida = sum(float(p["Potencia [W]"]) for p in potencias_data if "Absorbe" in p["Comportamiento"])
+    
+    col_bal1, col_bal2, col_bal3 = st.columns(3)
+    with col_bal1:
+        st.metric("Potencia Disipada", f"{potencia_total_disipada:.4f} W")
+    with col_bal2:
+        st.metric("Potencia Entregada", f"{potencia_total_entregada:.4f} W")
+    with col_bal3:
+        st.metric("Potencia Absorbida", f"{potencia_total_absorbida:.4f} W")
+    
+    if abs(potencia_total_entregada - (potencia_total_disipada + abs(potencia_total_absorbida))) < 1e-6:
+        st.success("✅ Balance de potencia verificado: Potencia Entregada = Potencia Disipada + Potencia Absorbida")
+    else:
+        st.warning("⚠️ Balance de potencia no verificado")
+
+# ---------- FUNCIONES EXISTENTES PARA CIRCUITOS DINÁMICOS ----------
 def verificar_circuito_rc_valido(componentes):
     """Verifica si el circuito es un RC serie válido (1R, 1C, 1V en serie)"""
     num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
@@ -422,266 +800,6 @@ def generar_reporte_rlc(R, L, C, Vin):
     st.markdown("### 3. Variable de Estado")
     st.latex(r"x_1(t) = v_C(t), \quad x_2(t) = i_L(t)")
 
-def generar_reporte_estatico(componentes):
-    """Genera reporte para circuitos estáticos con convención libro, corrientes y potencias"""
-    st.subheader("📐 Análisis de Circuito Estático")
-    
-    st.write("**Componentes detectados:**")
-    for c in componentes:
-        st.write(f"- {c['nombre']}: {c['tipo']} = {c['valor']}{c['prefijo']}{c['unidad']}")
-    
-    nodos = obtener_nodos(componentes)
-    nodos_no_tierra = [n for n in nodos if n != "N0"]
-    n = len(nodos_no_tierra)
-    
-    if n == 0:
-        st.warning("No hay nodos para análisis (solo tierra)")
-        return
-    
-    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
-    G = zeros(n, n)
-    I = zeros(n, 1)
-    
-    # Convención:
-    # Corriente positiva = entra al nodo
-    # Fuente de corriente: fluye de nodo_origen → nodo_destino
-    #   - En nodo_origen: la corriente SALE → contribución NEGATIVA
-    #   - En nodo_destino: la corriente ENTRA → contribución POSITIVA
-    
-    # Construir matriz de conductancias
-    for c in componentes:
-        if c['tipo'] == "Resistencia":
-            G_val = 1 / c['valor_total']
-            nodo_o = c['nodo_origen']
-            nodo_d = c['nodo_destino']
-            
-            if nodo_o != "N0" and nodo_d != "N0":
-                i = nodo_idx[nodo_o]
-                j = nodo_idx[nodo_d]
-                G[i, i] += G_val
-                G[j, j] += G_val
-                G[i, j] -= G_val
-                G[j, i] -= G_val
-            elif nodo_o != "N0":
-                i = nodo_idx[nodo_o]
-                G[i, i] += G_val
-            elif nodo_d != "N0":
-                i = nodo_idx[nodo_d]
-                G[i, i] += G_val
-        
-        elif c['tipo'] == "Fuente de Corriente":
-            I_val = c['valor_total']
-            nodo_o = c['nodo_origen']
-            nodo_d = c['nodo_destino']
-            
-            # CORRECCIÓN: Signos correctos para convención estándar
-            # La corriente fluye de nodo_origen → nodo_destino
-            if nodo_o != "N0":
-                I[nodo_idx[nodo_o], 0] -= I_val  # Sale del nodo_origen → negativo
-            if nodo_d != "N0":
-                I[nodo_idx[nodo_d], 0] += I_val  # Entra al nodo_destino → positivo
-        
-        elif c['tipo'] == "Fuente de Voltaje":
-            st.warning(f"Fuente de voltaje {c['nombre']} requiere supernodo")
-    
-    # Resolver sistema
-    try:
-        if G.det() != 0:
-            V_sol = G.inv() * I
-            V_numerico = np.array(V_sol).astype(float).flatten()
-            
-            # Crear diccionario de voltajes
-            voltajes = {}
-            for i, nodo in enumerate(nodos_no_tierra):
-                voltajes[nodo] = V_numerico[i]
-            
-            # ========== PARTE 1: RESULTADOS - TABLA ==========
-            st.markdown("### 📖 Resultados en Convención de Libro")
-            
-            # Crear DataFrame para voltajes
-            voltajes_df = pd.DataFrame([
-                {"Nodo": nodo, "Voltaje [V]": f"{v:.4f}"}
-                for nodo, v in voltajes.items()
-            ])
-            st.dataframe(voltajes_df, use_container_width=True, hide_index=True)
-            st.caption("Nota: Voltajes de nodo con respecto a tierra (N0 = 0V)")
-            
-            # ========== PARTE 2: CORRIENTES EN RAMAS (CONVENCIÓN LIBRO) ==========
-            st.markdown("### 🔄 Corrientes en Ramas (Convención Libro)")
-            st.caption("La corriente fluye del nodo de mayor potencial al de menor potencial")
-            
-            corrientes_data = []
-            for c in componentes:
-                if c['tipo'] == "Resistencia":
-                    nodo_o = c['nodo_origen']
-                    nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
-                    R = c['valor_total']
-                    # Corriente: I = (V_origen - V_destino) / R
-                    i_libro = (v_o - v_d) / R
-                    
-                    if i_libro > 0:
-                        direccion = f"{nodo_o} → {nodo_d}"
-                    elif i_libro < 0:
-                        direccion = f"{nodo_d} → {nodo_o}"
-                    else:
-                        direccion = "Cero"
-                    
-                    corrientes_data.append({
-                        "Elemento": c['nombre'],
-                        "Tipo": c['tipo'],
-                        "Corriente [A]": f"{i_libro:.4f}",
-                        "Dirección": direccion
-                    })
-                elif c['tipo'] == "Fuente de Corriente":
-                    # Las fuentes de corriente tienen corriente fija
-                    I_val = c['valor_total']
-                    if c['nodo_origen'] != "N0" and c['nodo_destino'] != "N0":
-                        direccion = f"{c['nodo_origen']} → {c['nodo_destino']}"
-                    elif c['nodo_origen'] != "N0":
-                        direccion = f"{c['nodo_origen']} → N0"
-                    else:
-                        direccion = f"N0 → {c['nodo_destino']}"
-                    
-                    corrientes_data.append({
-                        "Elemento": c['nombre'],
-                        "Tipo": c['tipo'],
-                        "Corriente [A]": f"{I_val:.4f}",
-                        "Dirección": direccion
-                    })
-            
-            if corrientes_data:
-                corrientes_df = pd.DataFrame(corrientes_data)
-                st.dataframe(corrientes_df, use_container_width=True, hide_index=True)
-            
-            # ========== PARTE 3: VALIDACIÓN KCL ==========
-            st.markdown("### ✅ Validación KCL")
-            st.caption("KCL: Suma de corrientes que entran al nodo = 0")
-            
-            kcl_data = []
-            tolerancia = 1e-6
-            for nodo in nodos_no_tierra:
-                suma = 0
-                for c in componentes:
-                    if c['tipo'] == "Resistencia":
-                        nodo_o = c['nodo_origen']
-                        nodo_d = c['nodo_destino']
-                        v_o = voltajes.get(nodo_o, 0)
-                        v_d = voltajes.get(nodo_d, 0)
-                        R = c['valor_total']
-                        i_libro = (v_o - v_d) / R
-                        
-                        if nodo_o == nodo:
-                            suma -= i_libro  # Sale del nodo → negativo
-                        elif nodo_d == nodo:
-                            suma += i_libro  # Entra al nodo → positivo
-                    
-                    elif c['tipo'] == "Fuente de Corriente":
-                        I_val = c['valor_total']
-                        nodo_o = c['nodo_origen']
-                        nodo_d = c['nodo_destino']
-                        
-                        if nodo_o == nodo:
-                            suma -= I_val  # Sale del nodo → negativo
-                        elif nodo_d == nodo:
-                            suma += I_val  # Entra al nodo → positivo
-                
-                if abs(suma) < tolerancia:
-                    status = "✅ Satisfecha"
-                else:
-                    status = "❌ No satisfecha"
-                
-                kcl_data.append({
-                    "Nodo": nodo,
-                    "Suma Corrientes [A]": f"{suma:.2e}",
-                    "Estado": status
-                })
-            
-            if kcl_data:
-                kcl_df = pd.DataFrame(kcl_data)
-                st.dataframe(kcl_df, use_container_width=True, hide_index=True)
-            
-            # ========== PARTE 4: POTENCIAS - TABLA ==========
-            st.markdown("### ⚡ Potencias en Elementos (Convención Libro)")
-            st.caption("Para resistencias: P = V·I > 0 (disipación). Para fuentes: P > 0 entrega, P < 0 absorbe")
-            
-            potencias_data = []
-            for c in componentes:
-                if c['tipo'] == "Resistencia":
-                    nodo_o = c['nodo_origen']
-                    nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
-                    v = v_o - v_d
-                    i = v / c['valor_total']
-                    P = v * i
-                    
-                    # En resistencia, P siempre es positiva (disipación)
-                    if P < 0:
-                        P = -P
-                        v = abs(v)
-                        i = abs(i)
-                    
-                    potencias_data.append({
-                        "Elemento": c['nombre'],
-                        "Tipo": c['tipo'],
-                        "Voltaje [V]": f"{v:.4f}",
-                        "Corriente [A]": f"{i:.4f}",
-                        "Potencia [W]": f"{P:.4f}",
-                        "Comportamiento": "🔋 Disipa"
-                    })
-                
-                elif c['tipo'] == "Fuente de Corriente":
-                    nodo_o = c['nodo_origen']
-                    nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
-                    v = v_o - v_d
-                    I_val = c['valor_total']
-                    P = v * I_val
-                    
-                    if P > 0:
-                        comportamiento = "⚡ Entrega"
-                    else:
-                        comportamiento = "🔋 Absorbe"
-                    
-                    potencias_data.append({
-                        "Elemento": c['nombre'],
-                        "Tipo": c['tipo'],
-                        "Voltaje [V]": f"{v:.4f}",
-                        "Corriente [A]": f"{I_val:.4f}",
-                        "Potencia [W]": f"{P:.4f}",
-                        "Comportamiento": comportamiento
-                    })
-            
-            if potencias_data:
-                potencias_df = pd.DataFrame(potencias_data)
-                st.dataframe(potencias_df, use_container_width=True, hide_index=True)
-            
-            # ========== PARTE 5: BALANCE DE POTENCIA ==========
-            st.markdown("### ⚖️ Balance de Potencia")
-            
-            potencia_total_disipada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Disipa" in p["Comportamiento"])
-            potencia_total_entregada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Entrega" in p["Comportamiento"])
-            potencia_total_absorbida = sum(float(p["Potencia [W]"]) for p in potencias_data if "Absorbe" in p["Comportamiento"])
-            
-            col_bal1, col_bal2, col_bal3 = st.columns(3)
-            with col_bal1:
-                st.metric("Potencia Disipada", f"{potencia_total_disipada:.4f} W")
-            with col_bal2:
-                st.metric("Potencia Entregada", f"{potencia_total_entregada:.4f} W")
-            with col_bal3:
-                st.metric("Potencia Absorbida", f"{potencia_total_absorbida:.4f} W")
-            
-            if abs(potencia_total_entregada - (potencia_total_disipada + abs(potencia_total_absorbida))) < 1e-6:
-                st.success("✅ Balance de potencia verificado: Potencia Entregada = Potencia Disipada + Potencia Absorbida")
-            else:
-                st.warning("⚠️ Balance de potencia no verificado")
-            
-    except Exception as e:
-        st.warning(f"No se pudo resolver el sistema: {e}")
-
 def generar_reporte_dinamico(componentes, subtipo, orden):
     """Genera reporte para circuitos dinámicos"""
     st.subheader(f"📐 Análisis de Circuito Dinámico - Tipo: {subtipo}")
@@ -765,6 +883,7 @@ def generar_reporte_dinamico(componentes, subtipo, orden):
             elif tipo == "Fuente de Corriente":
                 st.latex(latex(Eq(i_componentes[nombre], valor)))
 
+# ---------- FUNCIONES DE GRAFICO ----------
 def dibujar_grafo_formal(cs):
     """Genera un grafo formal del circuito"""
     G = nx.MultiDiGraph()
@@ -899,7 +1018,7 @@ with b2:
             st.info(f"**Tipo de sistema:** {tipo_sistema} | **Subtipo:** {subtipo} | **Orden:** {orden}")
             
             if tipo_sistema == "Estático":
-                generar_reporte_estatico(st.session_state.componentes)
+                generar_reporte_estatico_mna(st.session_state.componentes)
             else:
                 generar_reporte_dinamico(st.session_state.componentes, subtipo, orden)
 
@@ -990,23 +1109,29 @@ legend('iL(t)', 'Valor final');
                 else:
                     st.info("No se detectó un circuito RL válido")
             
-            elif tipo_sistema == "Estático":
-                # Generar código MATLAB para circuito resistivo
+            else:
+                # Generar código MATLAB para MNA general
                 nodos = obtener_nodos(st.session_state.componentes)
                 nodos_no_tierra = [n for n in nodos if n != "N0"]
-                n = len(nodos_no_tierra)
+                n_nodos = len(nodos_no_tierra)
+                fuentes_v = [c for c in st.session_state.componentes if c['tipo'] == "Fuente de Voltaje"]
+                m = len(fuentes_v)
                 
-                if n > 0:
+                if n_nodos > 0:
                     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
                     
-                    matlab_code = f"""% Circuito Resistivo - Análisis Nodal
+                    matlab_code = f"""% Circuito General - Modified Nodal Analysis (MNA)
 clear; clc;
 
-% Matriz de conductancias G ({n}x{n})
-G = zeros({n},{n});
+% Nodos: {n_nodos}
+% Fuentes de voltaje: {m}
+% Tamaño del sistema MNA: {n_nodos + m}
 
-% Vector de corrientes I ({n}x1)
-I = zeros({n},1);
+% Inicializar matrices
+G = zeros({n_nodos},{n_nodos});
+B = zeros({n_nodos},{m});
+I = zeros({n_nodos},1);
+E = zeros({m},1);
 
 """
                     # Agregar resistencias
@@ -1030,65 +1155,67 @@ I = zeros({n},1);
                                 i = nodo_idx[nodo_d]
                                 matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
                     
-                    # Agregar fuentes de corriente con signos correctos
+                    # Agregar fuentes de corriente
                     for c in st.session_state.componentes:
                         if c['tipo'] == "Fuente de Corriente":
                             I_val = c['valor_total']
                             nodo_o = c['nodo_origen']
                             nodo_d = c['nodo_destino']
                             
-                            # La corriente fluye de nodo_origen → nodo_destino
                             if nodo_o != "N0":
                                 i = nodo_idx[nodo_o]
-                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"  # Sale → negativo
+                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
                             if nodo_d != "N0":
                                 i = nodo_idx[nodo_d]
-                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"  # Entra → positivo
+                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"
+                    
+                    # Agregar fuentes de voltaje
+                    for idx_v, c in enumerate(fuentes_v):
+                        V_val = c['valor_total']
+                        nodo_o = c['nodo_origen']
+                        nodo_d = c['nodo_destino']
+                        
+                        matlab_code += f"E({idx_v+1}) = {V_val:.6f};\n"
+                        
+                        if nodo_o != "N0":
+                            i = nodo_idx[nodo_o]
+                            matlab_code += f"B({i+1},{idx_v+1}) = 1;\n"
+                        if nodo_d != "N0":
+                            i = nodo_idx[nodo_d]
+                            matlab_code += f"B({i+1},{idx_v+1}) = -1;\n"
                     
                     matlab_code += """
-% Resolver sistema G*V = I
-V = G \\ I;
+% Construir sistema MNA
+M = [G, B; B', zeros(size(B,2))];
+b = [I; E];
+
+% Resolver sistema
+x = M \\ b;
+
+% Extraer resultados
+n_nodos = size(G,1);
+m = size(B,2);
+V = x(1:n_nodos);
+Iv = x(n_nodos+1:end);
 
 % Mostrar resultados
-disp('=== SOLUCIÓN DEL CIRCUITO RESISTIVO ===');
+disp('=== SOLUCIÓN DEL CIRCUITO ===');
 disp('Voltajes nodales:');
 """
                     for i, nodo in enumerate(nodos_no_tierra):
                         matlab_code += f"fprintf('V_{nodo} = %.4f V\\n', V({i+1}));\n"
                     
-                    matlab_code += """
-% Calcular corrientes en resistencias
-disp('\\nCorrientes en resistencias:');
+                    if m > 0:
+                        matlab_code += """
+disp('\\nCorrientes en fuentes de voltaje:');
 """
-                    for c in st.session_state.componentes:
-                        if c['tipo'] == "Resistencia":
-                            nodo_o = c['nodo_origen']
-                            nodo_d = c['nodo_destino']
-                            R = c['valor_total']
-                            
-                            if nodo_o != "N0":
-                                idx_o = nodo_idx[nodo_o] + 1
-                            else:
-                                idx_o = None
-                            if nodo_d != "N0":
-                                idx_d = nodo_idx[nodo_d] + 1
-                            else:
-                                idx_d = None
-                            
-                            if idx_o and idx_d:
-                                matlab_code += f"i_{c['nombre']} = (V({idx_o}) - V({idx_d})) / {R:.6f};\n"
-                            elif idx_o:
-                                matlab_code += f"i_{c['nombre']} = (V({idx_o}) - 0) / {R:.6f};\n"
-                            elif idx_d:
-                                matlab_code += f"i_{c['nombre']} = (0 - V({idx_d})) / {R:.6f};\n"
-                            matlab_code += f"fprintf('{c['nombre']}: i = %.4f A\\n', i_{c['nombre']});\n"
+                        for idx_v, c in enumerate(fuentes_v):
+                            matlab_code += f"fprintf('{c['nombre']}: i = %.4f A\\n', Iv({idx_v+1}));\n"
                     
                     st.code(matlab_code, language="matlab")
-                    st.download_button("Descargar código MATLAB", matlab_code, "circuito_resistivo.m", key="descargar_matlab_resistivo")
+                    st.download_button("Descargar código MATLAB", matlab_code, "circuito_mna.m", key="descargar_matlab_mna")
                 else:
-                    st.info("Circuito resistivo sin nodos válidos para análisis nodal")
-            else:
-                st.info("Circuito no compatible con generación automática de código MATLAB")
+                    st.info("Circuito sin nodos válidos para análisis")
 
 with b4:
     if st.button("Limpiar Todo", key="limpiar_todo"):
