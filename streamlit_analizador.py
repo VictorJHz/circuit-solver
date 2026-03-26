@@ -421,7 +421,7 @@ def generar_reporte_rlc(R, L, C, Vin):
     st.latex(r"x_1(t) = v_C(t), \quad x_2(t) = i_L(t)")
 
 def generar_reporte_estatico(componentes):
-    """Genera reporte para circuitos estaticos"""
+    """Genera reporte para circuitos estaticos con convencion libro, corrientes y potencias"""
     st.subheader("📐 Analisis de Circuito Estatico")
     
     st.write("**Componentes detectados:**")
@@ -440,6 +440,7 @@ def generar_reporte_estatico(componentes):
     G = zeros(n, n)
     I = zeros(n, 1)
     
+    # Construir matriz de conductancias
     for c in componentes:
         if c['tipo'] == "Resistencia":
             G_val = 1 / c['valor_total']
@@ -473,19 +474,150 @@ def generar_reporte_estatico(componentes):
         elif c['tipo'] == "Fuente de Voltaje":
             st.warning(f"Fuente de voltaje {c['nombre']} requiere supernodo")
     
-    st.write("### Matriz de Conductancias G")
-    st.latex(latex(G))
-    st.write("### Vector de Corrientes I")
-    st.latex(latex(I))
-    
+    # Resolver sistema
     try:
         if G.det() != 0:
             V_sol = G.inv() * I
-            st.write("**Voltajes de nodo:**")
+            V_numerico = np.array(V_sol).astype(float).flatten()
+            
+            # Crear diccionario de voltajes
+            voltajes = {}
             for i, nodo in enumerate(nodos_no_tierra):
-                st.latex(f"V_{{{nodo}}} = {latex(V_sol[i, 0])} \\quad [V]")
-    except:
-        st.warning("No se pudo resolver el sistema")
+                voltajes[nodo] = V_numerico[i]
+            
+            # ========== PARTE 1: CONVENCION LIBRO ==========
+            st.markdown("### 📖 Resultados en Convencion de Libro")
+            st.write("**Voltajes de nodo (Solver):**")
+            for nodo, v in voltajes.items():
+                st.latex(f"V_{{{nodo}}}^{{solver}} = {v:.4f} \\quad [V]")
+            
+            st.write("**Voltajes de nodo (Convencion Libro):**")
+            for nodo, v in voltajes.items():
+                st.latex(f"V_{{{nodo}}}^{{libro}} = {-v:.4f} \\quad [V]")
+            st.caption("Nota: Convencion libro considera V = -V_solver")
+            
+            # ========== PARTE 2: CORRIENTES EN RAMAS ==========
+            st.markdown("### 🔄 Corrientes en Ramas")
+            
+            for c in componentes:
+                if c['tipo'] == "Resistencia":
+                    nodo_o = c['nodo_origen']
+                    nodo_d = c['nodo_destino']
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
+                    R = c['valor_total']
+                    i = (v_o - v_d) / R
+                    
+                    if i > 0:
+                        direccion = f"de {nodo_o} a {nodo_d}"
+                    elif i < 0:
+                        direccion = f"de {nodo_d} a {nodo_o}"
+                    else:
+                        direccion = "cero"
+                    
+                    st.write(f"**{c['nombre']}:** i = {i:.4f} A → flujo real {direccion}")
+            
+            # ========== PARTE 3: VALIDACION KCL ==========
+            st.markdown("### ✅ Validacion KCL")
+            
+            tolerancia = 1e-6
+            for nodo in nodos_no_tierra:
+                suma = 0
+                for c in componentes:
+                    if c['tipo'] == "Resistencia":
+                        nodo_o = c['nodo_origen']
+                        nodo_d = c['nodo_destino']
+                        v_o = voltajes.get(nodo_o, 0)
+                        v_d = voltajes.get(nodo_d, 0)
+                        R = c['valor_total']
+                        i = (v_o - v_d) / R
+                        
+                        if nodo_o == nodo:
+                            suma += i
+                        elif nodo_d == nodo:
+                            suma -= i
+                    
+                    elif c['tipo'] == "Fuente de Corriente":
+                        nodo_o = c['nodo_origen']
+                        nodo_d = c['nodo_destino']
+                        I_val = c['valor_total']
+                        
+                        if nodo_o == nodo:
+                            suma += I_val
+                        elif nodo_d == nodo:
+                            suma -= I_val
+                
+                if abs(suma) < tolerancia:
+                    st.success(f"✔ Nodo {nodo}: KCL satisfecha (suma = {suma:.2e} A)")
+                else:
+                    st.error(f"❌ Nodo {nodo}: KCL no satisfecha (suma = {suma:.2e} A)")
+            
+            # ========== PARTE 4: POTENCIAS ==========
+            st.markdown("### ⚡ Potencias en Elementos")
+            
+            potencias = []
+            for c in componentes:
+                if c['tipo'] == "Resistencia":
+                    nodo_o = c['nodo_origen']
+                    nodo_d = c['nodo_destino']
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
+                    v = v_o - v_d
+                    i = v / c['valor_total']
+                    P = v * i
+                    
+                    if P > 0:
+                        tipo = "Disipa"
+                    else:
+                        tipo = "Entrega"
+                    
+                    potencias.append({
+                        "elemento": c['nombre'],
+                        "tipo_comp": c['tipo'],
+                        "voltaje": v,
+                        "corriente": i,
+                        "potencia": P,
+                        "comportamiento": tipo
+                    })
+                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {i:.4f} A, P = {P:.4f} W → {tipo}")
+                
+                elif c['tipo'] == "Fuente de Corriente":
+                    nodo_o = c['nodo_origen']
+                    nodo_d = c['nodo_destino']
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
+                    v = v_o - v_d
+                    I_val = c['valor_total']
+                    P = v * I_val
+                    
+                    if P > 0:
+                        tipo = "Entrega"
+                    else:
+                        tipo = "Disipa"
+                    
+                    potencias.append({
+                        "elemento": c['nombre'],
+                        "tipo_comp": c['tipo'],
+                        "voltaje": v,
+                        "corriente": I_val,
+                        "potencia": P,
+                        "comportamiento": tipo
+                    })
+                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {I_val:.4f} A, P = {P:.4f} W → {tipo}")
+                
+                elif c['tipo'] == "Fuente de Voltaje":
+                    st.write(f"**{c['nombre']}:** Corriente no determinada en analisis nodal")
+            
+            # Tabla de potencias
+            if potencias:
+                st.write("**Tabla de Potencias:**")
+                st.markdown("| Elemento | Tipo | V [V] | I [A] | P [W] | Comportamiento |")
+                st.markdown("|----------|------|-------|-------|-------|----------------|")
+                for p in potencias:
+                    st.markdown(f"| {p['elemento']} | {p['tipo_comp']} | {p['voltaje']:.4f} | {p['corriente']:.4f} | {p['potencia']:.4f} | {p['comportamiento']} |")
+            
+    except Exception as e:
+        st.warning(f"No se pudo resolver el sistema: {e}")
 
 def generar_reporte_dinamico(componentes, subtipo, orden):
     """Genera reporte para circuitos dinamicos"""
@@ -751,9 +883,10 @@ plot([0 5*tau], [Vin Vin], '--r');
 legend('Vc(t)', 'Vin');
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab")
+                    st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab_rc")
                 else:
                     st.info("No se detecto un circuito RC valido")
+            
             elif subtipo == "RL" and verificar_circuito_rl_valido(st.session_state.componentes):
                 R, L, Vin = None, None, None
                 for c in st.session_state.componentes:
@@ -790,9 +923,117 @@ plot([0 5*tau], [Vin/R Vin/R], '--r');
 legend('iL(t)', 'Valor final');
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar codigo MATLAB", code, "circuito_rl.m", key="descargar_matlab")
+                    st.download_button("Descargar codigo MATLAB", code, "circuito_rl.m", key="descargar_matlab_rl")
                 else:
                     st.info("No se detecto un circuito RL valido")
+            
+            elif tipo_sistema == "Estatico":
+                # Generar codigo MATLAB para circuito resistivo
+                nodos = obtener_nodos(st.session_state.componentes)
+                nodos_no_tierra = [n for n in nodos if n != "N0"]
+                n = len(nodos_no_tierra)
+                
+                if n > 0:
+                    # Construir matrices G e I simbolicamente
+                    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
+                    
+                    # Generar codigo MATLAB
+                    matlab_code = f"""% Circuito Resistivo - Analisis Nodal
+clear; clc;
+
+% Matriz de conductancias G ({n}x{n})
+G = zeros({n},{n});
+
+% Vector de corrientes I ({n}x1)
+I = zeros({n},1);
+
+"""
+                    # Agregar resistencias
+                    for c in st.session_state.componentes:
+                        if c['tipo'] == "Resistencia":
+                            G_val = 1 / c['valor_total']
+                            nodo_o = c['nodo_origen']
+                            nodo_d = c['nodo_destino']
+                            
+                            if nodo_o != "N0" and nodo_d != "N0":
+                                i = nodo_idx[nodo_o]
+                                j = nodo_idx[nodo_d]
+                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                                matlab_code += f"G({j+1},{j+1}) = G({j+1},{j+1}) + {G_val:.6f};\n"
+                                matlab_code += f"G({i+1},{j+1}) = G({i+1},{j+1}) - {G_val:.6f};\n"
+                                matlab_code += f"G({j+1},{i+1}) = G({j+1},{i+1}) - {G_val:.6f};\n"
+                            elif nodo_o != "N0":
+                                i = nodo_idx[nodo_o]
+                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                            elif nodo_d != "N0":
+                                i = nodo_idx[nodo_d]
+                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                    
+                    # Agregar fuentes de corriente
+                    for c in st.session_state.componentes:
+                        if c['tipo'] == "Fuente de Corriente":
+                            I_val = c['valor_total']
+                            nodo_o = c['nodo_origen']
+                            nodo_d = c['nodo_destino']
+                            
+                            if nodo_o != "N0":
+                                i = nodo_idx[nodo_o]
+                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"
+                            if nodo_d != "N0":
+                                i = nodo_idx[nodo_d]
+                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
+                    
+                    # Agregar fuentes de voltaje (advertencia)
+                    tiene_fuente_v = any(c['tipo'] == "Fuente de Voltaje" for c in st.session_state.componentes)
+                    if tiene_fuente_v:
+                        matlab_code += """
+% NOTA: El circuito contiene fuentes de voltaje.
+% Este analisis nodal basico no las maneja directamente.
+% Se requiere el metodo de supernodo.
+"""
+                    
+                    matlab_code += """
+% Resolver sistema G*V = I
+V = G \\ I;
+
+% Mostrar resultados
+disp('=== SOLUCION DEL CIRCUITO RESISTIVO ===');
+disp('Voltajes nodales:');
+"""
+                    for i, nodo in enumerate(nodos_no_tierra):
+                        matlab_code += f"fprintf('V_{nodo} = %.4f V\\n', V({i+1}));\n"
+                    
+                    matlab_code += """
+% Calcular corrientes en resistencias
+disp('\\nCorrientes en resistencias:');
+"""
+                    for c in st.session_state.componentes:
+                        if c['tipo'] == "Resistencia":
+                            nodo_o = c['nodo_origen']
+                            nodo_d = c['nodo_destino']
+                            R = c['valor_total']
+                            
+                            if nodo_o != "N0":
+                                idx_o = nodo_idx[nodo_o] + 1
+                            else:
+                                idx_o = None
+                            if nodo_d != "N0":
+                                idx_d = nodo_idx[nodo_d] + 1
+                            else:
+                                idx_d = None
+                            
+                            if idx_o and idx_d:
+                                matlab_code += f"i_{c['nombre']} = (V({idx_o}) - V({idx_d})) / {R:.6f};\n"
+                            elif idx_o:
+                                matlab_code += f"i_{c['nombre']} = (V({idx_o}) - 0) / {R:.6f};\n"
+                            elif idx_d:
+                                matlab_code += f"i_{c['nombre']} = (0 - V({idx_d})) / {R:.6f};\n"
+                            matlab_code += f"fprintf('{c['nombre']}: i = %.4f A\\n', i_{c['nombre']});\n"
+                    
+                    st.code(matlab_code, language="matlab")
+                    st.download_button("Descargar codigo MATLAB", matlab_code, "circuito_resistivo.m", key="descargar_matlab_resistivo")
+                else:
+                    st.info("Circuito resistivo sin nodos validos para analisis nodal")
             else:
                 st.info("Circuito no compatible con generacion automatica de codigo MATLAB")
 
