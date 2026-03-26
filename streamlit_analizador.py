@@ -24,18 +24,18 @@ componentes_disponibles = {
 }
 
 prefijos = {"": 1, "p": 1e-12, "n": 1e-9, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
+prefijos_regex = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
 # ---------- FUNCIONES NETLIST ----------
 def parse_valor(valor_str):
-    """Parsea valores como 9, 27k, 100u, 2.2M"""
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
-    # Eliminar palabras como dc, ac pero mantener prefijos
-    # Primero extraer el numero con posible prefijo
-    match = re.match(r'^([\d\.]+)([pnumkM]?)(.*)$', valor_str)
+    # Eliminar palabras como dc, ac
+    valor_str = re.sub(r'[a-z]+', '', valor_str)
+    match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
-        num_str, pref, resto = match.groups()
+        num_str, pref = match.groups()
         try:
             num = float(num_str)
         except:
@@ -72,7 +72,6 @@ def parsear_netlist(texto):
         if not line or line.startswith('#') or line.startswith(';'):
             continue
         
-        # Eliminar comentarios
         if '#' in line:
             line = line.split('#')[0].strip()
         if ';' in line:
@@ -83,27 +82,22 @@ def parsear_netlist(texto):
             
         parts = line.split()
         if len(parts) < 4:
-            errores.append(f"Linea {line_num}: Formato incorrecto (minimo 4 campos)")
+            errores.append(f"Linea {line_num}: Formato incorrecto")
             continue
         
-        # El primer campo es el nombre del componente (V1, R1, C1)
         nombre = parts[0]
         letra = nombre[0].upper()
         
         if letra not in tipo_por_letra:
-            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido (use V, R, C, L, I)")
+            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
             continue
         
         tipo = tipo_por_letra[letra]
-        
-        # Nodos
         nodo_origen = parts[1]
         nodo_destino = parts[2]
         
-        # Buscar el valor (puede estar en pos 3 o 4 si hay DC/AC)
         valor_str = None
         for i in range(3, len(parts)):
-            # Buscar algo que parezca un numero (con o sin prefijo)
             if re.search(r'[\d\.]', parts[i]):
                 valor_str = parts[i]
                 break
@@ -112,14 +106,12 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: No se encontro valor")
             continue
         
-        # Parsear valor
         valor_total, prefijo = parse_valor(valor_str)
         if valor_total is None:
             errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
             continue
         
-        # Obtener el valor base para mostrar
-        mult = prefijos.get(prefijo, 1)
+        mult = prefijos_regex.get(prefijo, 1)
         valor_base = valor_total / mult if mult != 1 else valor_total
         
         componentes.append({
@@ -148,7 +140,7 @@ with st.sidebar.form(key='form_componente', clear_on_submit=True):
     tipo = st.selectbox("Tipo", list(componentes_disponibles.keys()))
     col_val, col_pref = st.columns([3,1])
     with col_val:
-        valor = st.text_input("Valor (numero)")
+        valor = st.text_input("Valor")
     with col_pref:
         pref = st.selectbox("Prefijo", list(prefijos.keys()), index=0)
     submit = st.form_submit_button("Agregar")
@@ -170,15 +162,14 @@ if submit:
             st.sidebar.success(f"Agregado {nombre}")
             st.rerun()
         except ValueError:
-            st.sidebar.error("El valor debe ser un numero")
+            st.sidebar.error("Valor numerico invalido")
 
 # ---------- NETLIST ----------
 st.sidebar.divider()
 st.sidebar.header("Netlist")
 with st.sidebar.expander("Cargar desde Netlist", expanded=False):
     st.markdown("**Formato:** V1 N0 N1 9   o   R1 N1 N2 27k")
-    netlist = st.text_area("Pega el netlist:", height=120, 
-                          placeholder="V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u")
+    netlist = st.text_area("Pega el netlist:", height=120)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -192,10 +183,7 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
                     for c in nuevos:
                         if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                             st.session_state.componentes.append(c)
-                            st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
                     st.rerun()
-                elif not errores:
-                    st.sidebar.warning("No se encontraron componentes")
             else:
                 st.sidebar.warning("Netlist vacio")
     
@@ -211,11 +199,9 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
 # ---------- MOSTRAR COMPONENTES ----------
 st.subheader("Componentes")
 if st.session_state.componentes:
-    col_clear1, col_clear2 = st.columns([4, 1])
-    with col_clear2:
-        if st.button("Limpiar Todos", key="clear_all"):
-            st.session_state.componentes = []
-            st.rerun()
+    if st.button("Limpiar Todos", key="clear_all"):
+        st.session_state.componentes = []
+        st.rerun()
     
     for i, c in enumerate(st.session_state.componentes):
         col1, col2 = st.columns([4,1])
@@ -262,6 +248,114 @@ def dibujar_grafo(cs):
         G.add_edge(c['nodo_origen'], c['nodo_destino'], label=label, color=color)
     return G
 
+def generar_reporte_completo(R, C, Vin):
+    """Genera el reporte completo con todos los bloques de analisis"""
+    tau = R * C
+    
+    st.markdown("---")
+    st.header("📐 Analisis Completo del Circuito RC")
+    
+    # ========== 1. CONVENCION UNICA ==========
+    st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
+    st.markdown("""
+    **Convencion de signos adoptada (UNICA para todo el desarrollo):**
+    - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
+    - **KVL:** v_rama = e_origen - e_destino
+    - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo, Z es operador diferencial)
+    """)
+    
+    # ========== 2. MATRIZ DE INCIDENCIA A ==========
+    st.markdown("### 1. Matriz de Incidencia A (UNICA)")
+    st.write("**Orden de ramas:** [V1, R1, C1]")
+    st.write("**Convencion:** +1 sale, -1 entra")
+    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+    st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
+    
+    # ========== 3. VECTOR e ==========
+    st.markdown("### 2. Vector e (Potenciales nodales)")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
+    st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
+    
+    # ========== 4. KCL EN FORMA MATRICIAL ==========
+    st.markdown("### 3. KCL en forma matricial")
+    st.latex(r"A \cdot i = 0")
+    st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
+    st.caption("Ecuaciones: i_V1 - i_R1 = 0, i_R1 - i_C1 = 0")
+    
+    # ========== 5. KVL EN FORMA MATRICIAL ==========
+    st.markdown("### 4. KVL en forma matricial")
+    st.latex(r"v = A^T \cdot e")
+    st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+    st.write("**Interpretacion explicita:**")
+    st.latex(r"v_{V1} = V_{N1} - 0 = V_{N1} \quad [V]")
+    st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
+    st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
+    
+    # ========== 6. BR EN DOMINIO TIEMPO ==========
+    st.markdown("### 5. Relaciones de los Componentes (BR) en dominio tiempo")
+    st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
+    st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
+    st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
+    st.write("")
+    st.write("**Forma integral equivalente del capacitor:**")
+    st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
+    
+    # ========== 7. MATRIZ Z ==========
+    st.markdown("### 6. Matriz Z (Impedancias) - Operador en dominio tiempo")
+    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
+    st.caption("El operador 1/(C·d/dt) representa la relacion integral: v_C = (1/C)∫ i_C dt")
+    
+    # ========== 8. VECTOR Vs ==========
+    st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
+    st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
+    st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
+    
+    # ========== 9. METODO DE TABLEAU ==========
+    st.markdown("### 8. Metodo de Tablueau - Forma Estandar")
+    st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
+    st.write("")
+    st.write("**Para el circuito RC:**")
+    st.latex(r"\begin{bmatrix} 0 & 0 & 1 & -1 & 0 & 0 & 0 & 0 \\ 0 & 0 & 0 & 1 & -1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 & 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 0 & 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 & 0 & 0 & 0 & 1 \\ 1 & 0 & 0 & 0 & 0 & -1 & 0 & 0 \\ -1 & 1 & 0 & 0 & 0 & 0 & -1 & 0 \\ 0 & -1 & 0 & 0 & 0 & 0 & 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \\ i_{V1} \\ i_{R1} \\ i_{C1} \\ v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ 0 \\ 0 \\ 0 \\ " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
+    
+    # ========== 10. ECUACION DIFERENCIAL ==========
+    st.markdown("### 9. Ecuacion Diferencial del Circuito (dominio tiempo)")
+    st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
+    st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
+    st.caption(f"Unidades: V_C [V], t [s], dV_C/dt [V/s]")
+    
+    # ========== 11. VARIABLE DE ESTADO ==========
+    st.markdown("### 10. Variable de Estado")
+    st.latex(r"x(t) = V_C(t) \quad [V]")
+    
+    # ========== 12. ECUACION DE ESTADO ==========
+    st.markdown("### 11. Ecuacion de Estado")
+    a = -1/tau
+    b = Vin/tau
+    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{V_{{in}}}}{{RC}}")
+    st.latex(rf"\dot{{x}} = {a:.4f} x + {b:.4f} \quad [V/s]")
+    st.caption(f"Forma estandar: ẋ = A·x + B·u | A = {a:.4f} [1/s], B = {b:.4f} [V/s]")
+    
+    # ========== 13. CLASIFICACION DEL SISTEMA ==========
+    st.markdown("### 12. Clasificacion del Sistema")
+    st.write(f"- **Orden:** Sistema de primer orden")
+    st.write(f"- **Linealidad:** Lineal")
+    st.write(f"- **Invarianza:** Invariante en el tiempo")
+    st.write(f"- **Tipo:** Pasa-bajas de primer orden")
+    
+    # ========== 14. INTERPRETACION FISICA ==========
+    st.markdown("### 13. Interpretacion Fisica")
+    st.markdown(f"""
+    - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
+    - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
+    - **Estado estable:** Despues de {5*tau:.2f} s, Vc ≈ {Vin:.1f} V
+    - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
+    - **Comportamiento:** Respuesta exponencial creciente desde 0 hasta {Vin:.1f} V
+    """)
+    
+    # ========== 15. SOLUCION ANALITICA ==========
+    st.markdown("### 14. Solucion Analitica")
+    st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
+
 # ---------- BOTONES PRINCIPALES ----------
 st.subheader("Acciones")
 b1, b2, b3, b4 = st.columns(4)
@@ -290,42 +384,12 @@ with b2:
         else:
             R, C, Vin = analizar_rc(st.session_state.componentes)
             if R is not None and C is not None and Vin is not None:
-                tau = R * C
-                st.subheader("Analisis Completo del Circuito RC")
-                
-                st.write("**1. Matriz de Incidencia A**")
-                st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
-                
-                st.write("**2. Vector e (Potenciales nodales)**")
-                st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
-                
-                st.write("**3. KCL en forma matricial**")
-                st.latex(r"A \cdot i = 0")
-                st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
-                
-                st.write("**4. KVL en forma matricial**")
-                st.latex(r"v = A^T \cdot e")
-                st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
-                
-                st.write("**5. Relaciones de los Componentes (BR)**")
-                st.latex(r"v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
-                st.latex(r"v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
-                st.latex(r"i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
-                
-                st.write("**6. Ecuacion Diferencial**")
-                st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
-                st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
-                
-                st.write("**7. Variable de Estado**")
-                st.latex(r"x(t) = V_C(t)")
-                
-                st.write("**8. Ecuacion de Estado**")
-                st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
-                
-                st.write("**9. Solucion Analitica**")
-                st.latex(rf"V_C(t) = {Vin:.1f} \cdot (1 - e^{{-t/{tau:.4f}}})")
+                generar_reporte_completo(R, C, Vin)
             else:
                 st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para ver el analisis completo.")
+                st.write("**Componentes actuales:**")
+                for c in st.session_state.componentes:
+                    st.write(f"- {c['nombre']}: {c['tipo']}")
 
 with b3:
     if st.button("Codigo MATLAB", key="matlab"):
@@ -333,37 +397,53 @@ with b3:
         if R is not None and C is not None and Vin is not None:
             tau = R * C
             code = f"""% Circuito RC - Analisis Completo
+% Metodo de Tablueau en dominio tiempo
 clear; clc; close all;
 
-% Parametros
+%% Parametros del circuito
 R = {R:.6f};  % Ohm
 C = {C:.6f};  % Faradios
 Vin = {Vin:.6f};  % Voltios
-tau = R * C;  % Constante de tiempo
+tau = R * C;  % Constante de tiempo [s]
 
-% Variable de estado
+%% Variable de estado
 syms Vc(t)
 eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
 cond = Vc(0) == 0;
 Vc_sol = dsolve(eq, cond);
 
-% Resultados
+%% Resultados analiticos
 disp('=== SOLUCION DEL CIRCUITO RC ===');
-fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f))\\n', Vin, tau);
+fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
+disp(' ');
 pretty(Vc_sol);
 
-% Grafica
-figure;
-fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
-xlabel('t (s)'); ylabel('Vc(t) (V)');
-title('Respuesta del Circuito RC');
+%% Parametros del sistema
+fprintf('\\n=== PARAMETROS DEL SISTEMA ===\\n');
+fprintf('Constante de tiempo tau = %.4f [s]\\n', tau);
+fprintf('Voltaje final en estado estable = %.2f [V]\\n', Vin);
+fprintf('Tiempo de establecimiento (5tau) = %.4f [s]\\n', 5*tau);
+fprintf('Velocidad de respuesta = 1/tau = %.4f [1/s]\\n', 1/tau);
+
+%% Grafica de la respuesta
+figure('Position', [100, 100, 800, 500]);
+fplot(Vc_sol, [0 5*tau], 'LineWidth', 2, 'Color', 'b');
+xlabel('t [s]', 'FontSize', 12);
+ylabel('Vc(t) [V]', 'FontSize', 12);
+title('Respuesta del Circuito RC - Carga del Capacitor', 'FontSize', 14);
 grid on;
 hold on;
-plot([0 5*tau], [Vin Vin], '--r');
+plot([0 5*tau], [Vin Vin], '--r', 'LineWidth', 1.5);
 legend('Vc(t)', 'Vin', 'Location', 'best');
+
+%% Interpretacion fisica
+fprintf('\\n=== INTERPRETACION FISICA ===\\n');
+fprintf('El capacitor se carga desde 0 V hasta %.2f V\\n', Vin);
+fprintf('El regimen transitorio dura %.2f segundos (5τ)\\n', 5*tau);
+fprintf('La constante de tiempo τ = %.4f s representa el tiempo al 63.2%% de la carga final\\n', tau);
 """
             st.code(code, language="matlab")
-            st.download_button("Descargar", code, "circuito_rc.m", key="descargar_matlab")
+            st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab")
         else:
             st.info("Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para generar el codigo MATLAB.")
 
