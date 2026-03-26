@@ -343,7 +343,7 @@ def generar_reporte_rc(R, C, Vin, tau):
     st.markdown("### 🔷 CONVENCIÓN ÚNICA Y CONSISTENTE")
     st.markdown(r"""
     **Convención de signos adoptada:**
-    - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
+    - **KCL:** +1 = corriente que entra al nodo
     - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
     - **Convención de libro:** Las corrientes en resistencias fluyen del nodo de mayor potencial al de menor potencial
     """)
@@ -442,6 +442,12 @@ def generar_reporte_estatico(componentes):
     G = zeros(n, n)
     I = zeros(n, 1)
     
+    # Convención:
+    # Corriente positiva = entra al nodo
+    # Fuente de corriente: fluye de nodo_origen → nodo_destino
+    #   - En nodo_origen: la corriente SALE → contribución NEGATIVA
+    #   - En nodo_destino: la corriente ENTRA → contribución POSITIVA
+    
     # Construir matriz de conductancias
     for c in componentes:
         if c['tipo'] == "Resistencia":
@@ -468,10 +474,12 @@ def generar_reporte_estatico(componentes):
             nodo_o = c['nodo_origen']
             nodo_d = c['nodo_destino']
             
+            # CORRECCIÓN: Signos correctos para convención estándar
+            # La corriente fluye de nodo_origen → nodo_destino
             if nodo_o != "N0":
-                I[nodo_idx[nodo_o], 0] += I_val
+                I[nodo_idx[nodo_o], 0] -= I_val  # Sale del nodo_origen → negativo
             if nodo_d != "N0":
-                I[nodo_idx[nodo_d], 0] -= I_val
+                I[nodo_idx[nodo_d], 0] += I_val  # Entra al nodo_destino → positivo
         
         elif c['tipo'] == "Fuente de Voltaje":
             st.warning(f"Fuente de voltaje {c['nombre']} requiere supernodo")
@@ -482,14 +490,10 @@ def generar_reporte_estatico(componentes):
             V_sol = G.inv() * I
             V_numerico = np.array(V_sol).astype(float).flatten()
             
-            # Crear diccionario de voltajes (convención solver)
-            voltajes_solver = {}
+            # Crear diccionario de voltajes
+            voltajes = {}
             for i, nodo in enumerate(nodos_no_tierra):
-                voltajes_solver[nodo] = V_numerico[i]
-            
-            # ========== CONVENCIÓN LIBRO: V_libro = V_solver (sin cambio de signo) ==========
-            # En la convención de libro, los voltajes son los mismos que los calculados por el solver
-            voltajes_libro = voltajes_solver.copy()
+                voltajes[nodo] = V_numerico[i]
             
             # ========== PARTE 1: RESULTADOS - TABLA ==========
             st.markdown("### 📖 Resultados en Convención de Libro")
@@ -497,7 +501,7 @@ def generar_reporte_estatico(componentes):
             # Crear DataFrame para voltajes
             voltajes_df = pd.DataFrame([
                 {"Nodo": nodo, "Voltaje [V]": f"{v:.4f}"}
-                for nodo, v in voltajes_libro.items()
+                for nodo, v in voltajes.items()
             ])
             st.dataframe(voltajes_df, use_container_width=True, hide_index=True)
             st.caption("Nota: Voltajes de nodo con respecto a tierra (N0 = 0V)")
@@ -511,11 +515,11 @@ def generar_reporte_estatico(componentes):
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o_libro = voltajes_libro.get(nodo_o, 0)
-                    v_d_libro = voltajes_libro.get(nodo_d, 0)
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
                     R = c['valor_total']
                     # Corriente: I = (V_origen - V_destino) / R
-                    i_libro = (v_o_libro - v_d_libro) / R
+                    i_libro = (v_o - v_d) / R
                     
                     if i_libro > 0:
                         direccion = f"{nodo_o} → {nodo_d}"
@@ -553,6 +557,7 @@ def generar_reporte_estatico(componentes):
             
             # ========== PARTE 3: VALIDACIÓN KCL ==========
             st.markdown("### ✅ Validación KCL")
+            st.caption("KCL: Suma de corrientes que entran al nodo = 0")
             
             kcl_data = []
             tolerancia = 1e-6
@@ -562,15 +567,15 @@ def generar_reporte_estatico(componentes):
                     if c['tipo'] == "Resistencia":
                         nodo_o = c['nodo_origen']
                         nodo_d = c['nodo_destino']
-                        v_o_libro = voltajes_libro.get(nodo_o, 0)
-                        v_d_libro = voltajes_libro.get(nodo_d, 0)
+                        v_o = voltajes.get(nodo_o, 0)
+                        v_d = voltajes.get(nodo_d, 0)
                         R = c['valor_total']
-                        i_libro = (v_o_libro - v_d_libro) / R
+                        i_libro = (v_o - v_d) / R
                         
                         if nodo_o == nodo:
-                            suma += i_libro
+                            suma -= i_libro  # Sale del nodo → negativo
                         elif nodo_d == nodo:
-                            suma -= i_libro
+                            suma += i_libro  # Entra al nodo → positivo
                     
                     elif c['tipo'] == "Fuente de Corriente":
                         I_val = c['valor_total']
@@ -578,9 +583,9 @@ def generar_reporte_estatico(componentes):
                         nodo_d = c['nodo_destino']
                         
                         if nodo_o == nodo:
-                            suma += I_val
+                            suma -= I_val  # Sale del nodo → negativo
                         elif nodo_d == nodo:
-                            suma -= I_val
+                            suma += I_val  # Entra al nodo → positivo
                 
                 if abs(suma) < tolerancia:
                     status = "✅ Satisfecha"
@@ -606,9 +611,9 @@ def generar_reporte_estatico(componentes):
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o_libro = voltajes_libro.get(nodo_o, 0)
-                    v_d_libro = voltajes_libro.get(nodo_d, 0)
-                    v = v_o_libro - v_d_libro
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
+                    v = v_o - v_d
                     i = v / c['valor_total']
                     P = v * i
                     
@@ -630,9 +635,9 @@ def generar_reporte_estatico(componentes):
                 elif c['tipo'] == "Fuente de Corriente":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o_libro = voltajes_libro.get(nodo_o, 0)
-                    v_d_libro = voltajes_libro.get(nodo_d, 0)
-                    v = v_o_libro - v_d_libro
+                    v_o = voltajes.get(nodo_o, 0)
+                    v_d = voltajes.get(nodo_d, 0)
+                    v = v_o - v_d
                     I_val = c['valor_total']
                     P = v * I_val
                     
@@ -1025,19 +1030,20 @@ I = zeros({n},1);
                                 i = nodo_idx[nodo_d]
                                 matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
                     
-                    # Agregar fuentes de corriente
+                    # Agregar fuentes de corriente con signos correctos
                     for c in st.session_state.componentes:
                         if c['tipo'] == "Fuente de Corriente":
                             I_val = c['valor_total']
                             nodo_o = c['nodo_origen']
                             nodo_d = c['nodo_destino']
                             
+                            # La corriente fluye de nodo_origen → nodo_destino
                             if nodo_o != "N0":
                                 i = nodo_idx[nodo_o]
-                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"
+                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"  # Sale → negativo
                             if nodo_d != "N0":
                                 i = nodo_idx[nodo_d]
-                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
+                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"  # Entra → positivo
                     
                     matlab_code += """
 % Resolver sistema G*V = I
