@@ -26,12 +26,15 @@ componentes_disponibles = {
 prefijos = {"": 1, "p": 1e-12, "n": 1e-9, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 prefijos_regex = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
-# ---------- FUNCIONES NETLIST ----------
+# ---------- FUNCIONES NETLIST CORREGIDAS ----------
 def parse_valor(valor_str):
+    """Parsea valores como 9, 27k, 100u, 2.2M correctamente"""
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
-    valor_str = re.sub(r'[a-z]+', '', valor_str)
+    
+    # Buscar patron: numero + prefijo (p, n, u, m, k, M) o solo numero
+    # El prefijo puede ser p, n, u, m, k, M
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
         num_str, pref = match.groups()
@@ -71,6 +74,7 @@ def parsear_netlist(texto):
         if not line or line.startswith('#') or line.startswith(';'):
             continue
         
+        # Eliminar comentarios
         if '#' in line:
             line = line.split('#')[0].strip()
         if ';' in line:
@@ -81,23 +85,26 @@ def parsear_netlist(texto):
             
         parts = line.split()
         if len(parts) < 4:
-            errores.append(f"Linea {line_num}: Formato incorrecto")
+            errores.append(f"Linea {line_num}: Formato incorrecto (minimo 4 campos)")
             continue
         
+        # El primer campo es el nombre del componente (V1, R1, C1)
         nombre = parts[0]
         letra = nombre[0].upper()
         
         if letra not in tipo_por_letra:
-            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
+            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido (use V, R, C, L, I)")
             continue
         
         tipo = tipo_por_letra[letra]
         nodo_origen = parts[1]
         nodo_destino = parts[2]
         
+        # Buscar el valor (puede estar en pos 3 o 4 si hay DC/AC)
         valor_str = None
         for i in range(3, len(parts)):
-            if re.search(r'[\d\.]', parts[i]):
+            # Buscar algo que parezca un numero con prefijo (ej: 27k, 100u, 9)
+            if re.search(r'[\d\.]+[pnumkM]?', parts[i]):
                 valor_str = parts[i]
                 break
         
@@ -105,11 +112,13 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: No se encontro valor")
             continue
         
+        # Parsear valor (ahora con prefijo correcto)
         valor_total, prefijo = parse_valor(valor_str)
         if valor_total is None:
             errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
             continue
         
+        # Obtener el valor base para mostrar (sin prefijo)
         mult = prefijos_regex.get(prefijo, 1)
         valor_base = valor_total / mult if mult != 1 else valor_total
         
@@ -127,6 +136,9 @@ def parsear_netlist(texto):
             "nodo_destino": nodo_destino,
             "needs_current": componentes_disponibles[tipo]["needs_current"]
         })
+        
+        # Debug opcional
+        st.sidebar.write(f"DEBUG: {nombre} = {valor_base}{prefijo} = {valor_total}")
     
     return componentes, errores
 
@@ -182,6 +194,7 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
                     for c in nuevos:
                         if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                             st.session_state.componentes.append(c)
+                            st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
                     st.rerun()
             else:
                 st.sidebar.warning("Netlist vacio")
@@ -259,8 +272,8 @@ def generar_reporte_completo(R, C, Vin):
     st.markdown(r"""
     **Convencion de signos adoptada (UNICA para todo el desarrollo):**
     - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
-    - **KVL:** $v_{rama} = e_{origen} - e_{destino}$
-    - **BR:** $v_{rama} = Z \cdot i_{rama} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
+    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+    - **BR:** $v_{\text{rama}} = Z \cdot i_{\text{rama}} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
     """)
     
     # ========== 2. MATRIZ DE INCIDENCIA A ==========
@@ -299,10 +312,10 @@ def generar_reporte_completo(R, C, Vin):
     st.write("**Forma integral equivalente del capacitor:**")
     st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
     
-    # ========== 7. MATRIZ Z (OPERADOR) ==========
+    # ========== 7. MATRIZ Z (OPERADOR) - CORREGIDA ==========
     st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
     st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \cdot \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
-    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1}$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
+    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
     
     # ========== 8. VECTOR Vs ==========
     st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
@@ -334,14 +347,16 @@ def generar_reporte_completo(R, C, Vin):
     st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
     st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
     
-    # ========== 12. ECUACION DE ESTADO ==========
+    # ========== 12. ECUACION DE ESTADO (CORREGIDA) ==========
     st.markdown("### 11. Ecuacion de Estado")
-    a = -1/tau
-    b = Vin/tau
-    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{V_{{in}}}}{{RC}}")
-    st.latex(rf"\dot{{x}} = {a:.6f} x + {b:.6f} \quad [V/s]")
-    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$")
-    st.latex(f"A = {a:.6f}\ [1/s],\quad B = {b:.6f}\ [V/s],\quad u(t) = {Vin:.1f}\ [V]")
+    A = -1/tau
+    B = 1/tau  # B = 1/RC
+    u = Vin
+    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
+    st.latex(rf"\dot{{x}} = {A:.6f} x + {B:.6f} u \quad [V/s]")
+    st.latex(rf"u(t) = {Vin:.1f} \quad [V] \text{ (entrada constante)}")
+    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
+    st.latex(f"A = {A:.6f}\ [1/s],\quad B = {B:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
     
     # ========== 13. CLASIFICACION DEL SISTEMA ==========
     st.markdown("### 12. Clasificacion del Sistema")
@@ -349,14 +364,14 @@ def generar_reporte_completo(R, C, Vin):
     st.write(f"- **Linealidad:** Lineal")
     st.write(f"- **Invarianza:** Invariante en el tiempo")
     st.write(f"- **Tipo:** Pasa-bajas de primer orden")
-    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en s = -{1/tau:.4f})")
+    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en $s = -{1/tau:.4f}$)")
     
-    # ========== 14. INTERPRETACION FISICA ==========
+    # ========== 14. INTERPRETACION FISICA (CORREGIDA) ==========
     st.markdown("### 13. Interpretacion Fisica")
     st.markdown(f"""
     - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
     - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
-    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \approx {Vin:.1f}$ V
+    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \\approx {Vin:.1f}$ V
     - **Constante de tiempo:** $\\tau = {tau:.4f}$ s (63.2% de la carga final)
     - **Comportamiento:** Respuesta exponencial creciente: $V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})$
     """)
@@ -429,12 +444,13 @@ fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
 disp(' ');
 pretty(Vc_sol);
 
-%% Forma de estado
+%% Forma de estado (corregida)
 A = -1/tau;
-B = Vin/tau;
+B = 1/tau;
+u = Vin;
 fprintf('\\n=== FORMA DE ESTADO ===\\n');
 fprintf('dx/dt = %.6f x + %.6f u\\n', A, B);
-fprintf('u(t) = %.2f [V] (entrada)\\n', Vin);
+fprintf('u(t) = %.2f [V] (entrada)\\n', u);
 fprintf('y(t) = x(t) [V] (salida)\\n');
 
 %% Parametros del sistema
