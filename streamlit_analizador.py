@@ -106,17 +106,8 @@ def parsear_netlist(texto):
             nodo_origen = parts[1] if len(parts) > 1 else None
             nodo_destino = parts[2] if len(parts) > 2 else None
             
-            # Buscar el valor (puede estar en posicion 3 o 4 si hay DC/AC)
-            valor_str = None
-            for i in range(3, min(5, len(parts))):
-                p = parts[i]
-                # Verificar si parece un valor (tiene numeros)
-                if re.search(r'[\d\.]', p):
-                    valor_str = p
-                    break
-            
-            if not valor_str and len(parts) > 3:
-                valor_str = parts[3]
+            # Tomar SIEMPRE el último elemento como valor
+valor_str = parts[-1]
         else:
             # Formato con tipo separado
             letra = parts[0]
@@ -326,7 +317,8 @@ with b2:
                 st.subheader("Circuito RC")
                 st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
                 st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
-                st.latex(r"i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}")
+                st.latex(r"i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix
+                
                 st.latex(r"v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
                 st.latex(r"v_{V1}=V_{in},\quad v_{R1}=R i_{R1},\quad i_{C1}=C\frac{dv_{C1}}{dt}")
                 st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
