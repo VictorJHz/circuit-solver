@@ -298,9 +298,9 @@ def generar_reporte_completo(R, C, Vin):
     st.write("**Forma integral equivalente del capacitor:**")
     st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
     
-    # ========== 7. MATRIZ Z (OPERADOR) ==========
+    # ========== 7. MATRIZ Z (OPERADOR) - CORREGIDA ==========
     st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
-    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \cdot \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
+    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
     st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
     
     # ========== 8. VECTOR Vs ==========
@@ -333,16 +333,15 @@ def generar_reporte_completo(R, C, Vin):
     st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
     st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
     
-    # ========== 12. ECUACION DE ESTADO (CORREGIDA) ==========
+    # ========== 12. ECUACION DE ESTADO ==========
     st.markdown("### 11. Ecuacion de Estado")
-    A = -1/tau
-    B = 1/tau
-    u = Vin
+    A_val = -1/tau
+    B_val = 1/tau
     st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
-    st.latex(rf"\dot{{x}} = {A:.6f} x + {B:.6f} u \quad [V/s]")
+    st.latex(rf"\dot{{x}} = {A_val:.6f} x + {B_val:.6f} u \quad [V/s]")
     st.latex(rf"u(t) = {Vin:.1f} \quad [V]")
     st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
-    st.latex(f"A = {A:.6f}\ [1/s],\quad B = {B:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
+    st.latex(f"A = {A_val:.6f}\ [1/s],\quad B = {B_val:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
     
     # ========== 13. CLASIFICACION DEL SISTEMA ==========
     st.markdown("### 12. Clasificacion del Sistema")
@@ -430,7 +429,7 @@ fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
 disp(' ');
 pretty(Vc_sol);
 
-%% Forma de estado (corregida)
+%% Forma de estado
 A = -1/tau;
 B = 1/tau;
 u = Vin;
