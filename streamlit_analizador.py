@@ -231,160 +231,185 @@ def analizar_rc(cs):
             Vin = c['valor_total']
     return (R, C, Vin) if None not in (R, C, Vin) else (None, None, None)
 
-def dibujar_grafo(cs):
+def dibujar_grafo_formal(cs):
+    """
+    Genera un grafo formal del circuito con:
+    - Nodos: puntos de conexion
+    - Ramas: flechas con orientacion
+    - Polaridad: + en origen, - en destino
+    - Solo flechas, sin simbolos electricos
+    """
     G = nx.MultiDiGraph()
-    for n in obtener_nodos(cs):
-        G.add_node(n)
-    for c in cs:
-        color = {"Resistencia":"red", "Capacitor":"blue", "Inductor":"green", "Fuente de Voltaje":"orange", "Fuente de Corriente":"purple"}.get(c['tipo'], "gray")
-        tipo_label = {"Resistencia":"R", "Capacitor":"C", "Inductor":"L", "Fuente de Voltaje":"V", "Fuente de Corriente":"I"}.get(c['tipo'], "")
-        val = f"{c['valor']}{c['prefijo']}{c['unidad']}"
+    
+    # Obtener todos los nodos
+    nodos = obtener_nodos(cs)
+    for nodo in nodos:
+        G.add_node(nodo)
+    
+    # Asignar nombres de ramas (b1, b2, b3, ...)
+    ramas_info = []
+    for idx, c in enumerate(cs, 1):
+        nombre_rama = f"b{idx}"
+        
+        # Determinar orientacion y polaridad segun tipo de componente
         if c['tipo_elec'] == "Activo":
-            label = f"{c['nombre']}\n{tipo_label}={val}\n(+) -> (-)"
+            # Componente activo: la polaridad sigue la fuente
+            # Para fuente de voltaje: el origen es positivo (+), destino negativo (-)
+            origen = c['nodo_origen']
+            destino = c['nodo_destino']
+            polaridad = f"+{origen} → -{destino}"
         else:
-            label = f"{c['nombre']}\n{tipo_label}={val}\ni ->"
-        G.add_edge(c['nodo_origen'], c['nodo_destino'], label=label, color=color)
-    return G
-
-def generar_reporte_completo(R, C, Vin):
-    """Genera el reporte completo con todos los bloques de analisis"""
-    tau = R * C
+            # Componente pasivo: la corriente entra por el terminal positivo
+            # Convencion: el origen es el nodo de mayor potencial (positivo)
+            origen = c['nodo_origen']
+            destino = c['nodo_destino']
+            polaridad = f"+{origen} → -{destino}"
+        
+        G.add_edge(origen, destino, 
+                   label=nombre_rama,
+                   tipo=c['tipo'],
+                   tipo_elec=c['tipo_elec'],
+                   polaridad=polaridad,
+                   nombre_comp=c['nombre'],
+                   valor=f"{c['valor']}{c['prefijo']}{c['unidad']}")
+        
+        ramas_info.append({
+            "rama": nombre_rama,
+            "origen": origen,
+            "destino": destino,
+            "tipo": c['tipo'],
+            "tipo_elec": c['tipo_elec'],
+            "componente": c['nombre'],
+            "valor": f"{c['valor']}{c['prefijo']}{c['unidad']}"
+        })
     
-    st.markdown("---")
-    st.header("📐 Analisis Completo del Circuito RC")
-    
-    # ========== 1. CONVENCION UNICA ==========
-    st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
-    st.markdown(r"""
-    **Convencion de signos adoptada (UNICA para todo el desarrollo):**
-    - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
-    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
-    - **BR:** $v_{\text{rama}} = Z \cdot i_{\text{rama}} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
-    """)
-    
-    # ========== 2. MATRIZ DE INCIDENCIA A ==========
-    st.markdown("### 1. Matriz de Incidencia A")
-    st.write("**Orden de ramas:** [V1, R1, C1]")
-    st.write("**Convencion:** +1 sale, -1 entra")
-    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
-    st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
-    
-    # ========== 3. VECTOR e ==========
-    st.markdown("### 2. Vector e (Potenciales nodales)")
-    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
-    st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
-    
-    # ========== 4. KCL EN FORMA MATRICIAL ==========
-    st.markdown("### 3. KCL en forma matricial")
-    st.latex(r"A \cdot i = 0")
-    st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
-    st.caption("Ecuaciones: $i_{V1} - i_{R1} = 0$, $i_{R1} - i_{C1} = 0$")
-    
-    # ========== 5. KVL EN FORMA MATRICIAL ==========
-    st.markdown("### 4. KVL en forma matricial")
-    st.latex(r"v = A^T \cdot e")
-    st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
-    st.write("**Interpretacion explicita:**")
-    st.latex(r"v_{V1} = V_{N1} - 0 = V_{N1} \quad [V]")
-    st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
-    st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
-    
-    # ========== 6. BR EN DOMINIO TIEMPO ==========
-    st.markdown("### 5. Relaciones de los Componentes (BR) en dominio tiempo")
-    st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
-    st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
-    st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
-    st.write("")
-    st.write("**Forma integral equivalente del capacitor:**")
-    st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
-    
-    # ========== 7. MATRIZ Z (OPERADOR) - CORREGIDA ==========
-    st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
-    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
-    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
-    
-    # ========== 8. VECTOR Vs ==========
-    st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
-    st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
-    st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
-    
-    # ========== 9. METODO DE TABLEAU ==========
-    st.markdown("### 8. Metodo de Tablueau - Estructura en Bloques")
-    st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
-    st.write("")
-    st.write("**Dimensiones de los bloques:**")
-    st.write("- **A**: matriz de incidencia (2×3)")
-    st.write("- **I**: matriz identidad (3×3)")
-    st.write("- **Z**: matriz de operadores (3×3)")
-    st.write("- **Sistema total**: 8 ecuaciones × 8 variables")
-    st.write("")
-    st.write("**Variables:**")
-    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}_{(2×1)},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}_{(3×1)},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}_{(3×1)}")
-    
-    # ========== 10. ECUACION DIFERENCIAL ==========
-    st.markdown("### 9. Ecuacion Diferencial del Circuito")
-    st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
-    st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
-    st.caption(f"Unidades: $V_C$ [V], $t$ [s], $dV_C/dt$ [V/s]")
-    
-    # ========== 11. VARIABLE DE ESTADO ==========
-    st.markdown("### 10. Variable de Estado")
-    st.latex(r"x(t) = V_C(t) \quad [V]")
-    st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
-    st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
-    
-    # ========== 12. ECUACION DE ESTADO ==========
-    st.markdown("### 11. Ecuacion de Estado")
-    A_val = -1/tau
-    B_val = 1/tau
-    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
-    st.latex(rf"\dot{{x}} = {A_val:.6f} x + {B_val:.6f} u \quad [V/s]")
-    st.latex(rf"u(t) = {Vin:.1f} \quad [V]")
-    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
-    st.latex(f"A = {A_val:.6f}\ [1/s],\quad B = {B_val:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
-    
-    # ========== 13. CLASIFICACION DEL SISTEMA ==========
-    st.markdown("### 12. Clasificacion del Sistema")
-    st.write(f"- **Orden:** Sistema de primer orden")
-    st.write(f"- **Linealidad:** Lineal")
-    st.write(f"- **Invarianza:** Invariante en el tiempo")
-    st.write(f"- **Tipo:** Pasa-bajas de primer orden")
-    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en $s = -{1/tau:.4f}$)")
-    
-    # ========== 14. INTERPRETACION FISICA ==========
-    st.markdown("### 13. Interpretacion Fisica")
-    st.markdown(f"""
-    - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
-    - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
-    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \\approx {Vin:.1f}$ V
-    - **Constante de tiempo:** $\\tau = {tau:.4f}$ s (63.2% de la carga final)
-    - **Comportamiento:** Respuesta exponencial creciente: $V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})$
-    """)
-    
-    # ========== 15. SOLUCION ANALITICA ==========
-    st.markdown("### 14. Solucion Analitica")
-    st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
+    return G, nodos, ramas_info
 
 # ---------- BOTONES PRINCIPALES ----------
 st.subheader("Acciones")
 b1, b2, b3, b4 = st.columns(4)
 
 with b1:
-    if st.button("Mostrar Grafo", key="mostrar_grafo"):
+    if st.button("Mostrar Grafo Formal", key="mostrar_grafo"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
-            G = dibujar_grafo(st.session_state.componentes)
-            fig, ax = plt.subplots(figsize=(12,8))
-            pos = nx.spring_layout(G, seed=42, k=2)
-            nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=2500, ax=ax)
-            nx.draw_networkx_labels(G, pos, font_size=12, ax=ax)
-            colors = [d['color'] for u,v,d in G.edges(data=True)]
-            nx.draw_networkx_edges(G, pos, edge_color=colors, arrows=True, arrowsize=20, ax=ax)
-            labels = {(u,v): d['label'] for u,v,d in G.edges(data=True)}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=9, ax=ax)
+            G, nodos, ramas_info = dibujar_grafo_formal(st.session_state.componentes)
+            
+            # Mostrar lista de nodos
+            st.subheader("📌 Nodos del Circuito")
+            st.write(f"Nodos identificados: {', '.join(nodos)}")
+            st.caption("N0 = Tierra (referencia)")
+            
+            # Mostrar lista de ramas
+            st.subheader("🔗 Ramas del Circuito")
+            ramas_df = []
+            for r in ramas_info:
+                ramas_df.append({
+                    "Rama": r["rama"],
+                    "Origen": r["origen"],
+                    "Destino": r["destino"],
+                    "Tipo": r["tipo"],
+                    "Tipo Eléctrico": r["tipo_elec"],
+                    "Componente": r["componente"],
+                    "Valor": r["valor"]
+                })
+            st.dataframe(ramas_df, use_container_width=True)
+            
+            # Grafico formal
+            st.subheader("📊 Grafo Formal del Circuito")
+            st.caption("Representación: Nodos = puntos | Ramas = flechas | + = origen | - = destino")
+            
+            fig, ax = plt.subplots(figsize=(14, 10))
+            
+            # Disposicion circular para mejor visualizacion
+            pos = nx.circular_layout(G)
+            
+            # Dibujar nodos
+            nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
+                                   node_size=3000, ax=ax, edgecolors='black', linewidths=2)
+            nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
+            
+            # Dibujar ramas (flechas)
+            # Colores segun tipo de elemento
+            edge_colors = []
+            edge_widths = []
+            for u, v, d in G.edges(data=True):
+                if d['tipo_elec'] == "Activo":
+                    edge_colors.append('orange')
+                    edge_widths.append(3)
+                else:
+                    edge_colors.append('gray')
+                    edge_widths.append(2)
+            
+            nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True,
+                                   arrowsize=25, arrowstyle='->', ax=ax, 
+                                   connectionstyle="arc3,rad=0.15", width=edge_widths)
+            
+            # Etiquetas de ramas (b1, b2, ...)
+            edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, 
+                                        font_size=10, ax=ax,
+                                        bbox=dict(boxstyle="round,pad=0.3", 
+                                                 facecolor="white", alpha=0.8))
+            
+            # Agregar signos de polaridad (+ y -) en cada rama
+            for u, v, d in G.edges(data=True):
+                # Calcular posicion media de la arista
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                xm = (x1 + x2) / 2
+                ym = (y1 + y2) / 2
+                
+                # Desplazar ligeramente para evitar solapamiento
+                dx = (x2 - x1) * 0.15
+                dy = (y2 - y1) * 0.15
+                
+                # Signo + en el origen
+                ax.text(x1 + dx*0.5, y1 + dy*0.5, '+', 
+                       fontsize=14, fontweight='bold', color='green',
+                       ha='center', va='center')
+                
+                # Signo - en el destino
+                ax.text(x2 - dx*0.5, y2 - dy*0.5, '-', 
+                       fontsize=14, fontweight='bold', color='red',
+                       ha='center', va='center')
+            
+            plt.title("Grafo Formal del Circuito", fontsize=16, fontweight='bold')
             plt.axis('off')
+            
+            # Leyenda
+            legend_elements = [
+                plt.Line2D([0], [0], color='orange', linewidth=3, label='Rama Activa (Fuente)'),
+                plt.Line2D([0], [0], color='gray', linewidth=2, label='Rama Pasiva (R, L, C)'),
+                plt.Line2D([0], [0], marker='+', color='green', markersize=10, linestyle='None', label='Polo Positivo (+)'),
+                plt.Line2D([0], [0], marker='-', color='red', markersize=10, linestyle='None', label='Polo Negativo (-)')
+            ]
+            ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+            
             st.pyplot(fig)
+            
+            # Informacion adicional
+            with st.expander("📖 Interpretacion del Grafo Formal"):
+                st.markdown("""
+                **Convenciones utilizadas:**
+                - **Nodos**: Puntos de conexion electrica (N0 = tierra)
+                - **Ramas**: Elementos del circuito representados como flechas
+                - **Direccion de la flecha**: Sentido de corriente positiva
+                - **+ (verde)**: Terminal positivo (origen) - voltaje mas alto
+                - **- (rojo)**: Terminal negativo (destino) - voltaje mas bajo
+                
+                **Para elementos pasivos (R, L, C):**
+                - La corriente entra por el terminal positivo (+)
+                
+                **Para elementos activos (fuentes):**
+                - La polaridad sigue la definicion de la fuente
+                - Fuente de voltaje: + en el nodo de mayor potencial
+                
+                **Relacion con analisis nodal:**
+                - $v_{\\text{rama}} = e_{\\text{origen}} - e_{\\text{destino}}$
+                - La matriz de incidencia A se construye con +1 en origen, -1 en destino
+                """)
 
 with b2:
     if st.button("Generar Ecuaciones", key="generar_eq"):
@@ -472,3 +497,123 @@ with b4:
     if st.button("Limpiar Todo", key="limpiar_todo"):
         st.session_state.componentes = []
         st.rerun()
+
+# ---------- FUNCION DE REPORTE (mantenida igual) ----------
+def generar_reporte_completo(R, C, Vin):
+    """Genera el reporte completo con todos los bloques de analisis"""
+    tau = R * C
+    
+    st.markdown("---")
+    st.header("📐 Analisis Completo del Circuito RC")
+    
+    # ========== 1. CONVENCION UNICA ==========
+    st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
+    st.markdown(r"""
+    **Convencion de signos adoptada (UNICA para todo el desarrollo):**
+    - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
+    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+    - **BR:** $v_{\text{rama}} = Z \cdot i_{\text{rama}} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
+    """)
+    
+    # ========== 2. MATRIZ DE INCIDENCIA A ==========
+    st.markdown("### 1. Matriz de Incidencia A")
+    st.write("**Orden de ramas:** [V1, R1, C1]")
+    st.write("**Convencion:** +1 sale, -1 entra")
+    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+    st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
+    
+    # ========== 3. VECTOR e ==========
+    st.markdown("### 2. Vector e (Potenciales nodales)")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
+    st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
+    
+    # ========== 4. KCL EN FORMA MATRICIAL ==========
+    st.markdown("### 3. KCL en forma matricial")
+    st.latex(r"A \cdot i = 0")
+    st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
+    st.caption("Ecuaciones: $i_{V1} - i_{R1} = 0$, $i_{R1} - i_{C1} = 0$")
+    
+    # ========== 5. KVL EN FORMA MATRICIAL ==========
+    st.markdown("### 4. KVL en forma matricial")
+    st.latex(r"v = A^T \cdot e")
+    st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+    st.write("**Interpretacion explicita:**")
+    st.latex(r"v_{V1} = V_{N1} - 0 = V_{N1} \quad [V]")
+    st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
+    st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
+    
+    # ========== 6. BR EN DOMINIO TIEMPO ==========
+    st.markdown("### 5. Relaciones de los Componentes (BR) en dominio tiempo")
+    st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
+    st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
+    st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
+    st.write("")
+    st.write("**Forma integral equivalente del capacitor:**")
+    st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
+    
+    # ========== 7. MATRIZ Z (OPERADOR) ==========
+    st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
+    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
+    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
+    
+    # ========== 8. VECTOR Vs ==========
+    st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
+    st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
+    st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
+    
+    # ========== 9. METODO DE TABLEAU ==========
+    st.markdown("### 8. Metodo de Tablueau - Estructura en Bloques")
+    st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
+    st.write("")
+    st.write("**Dimensiones de los bloques:**")
+    st.write("- **A**: matriz de incidencia (2×3)")
+    st.write("- **I**: matriz identidad (3×3)")
+    st.write("- **Z**: matriz de operadores (3×3)")
+    st.write("- **Sistema total**: 8 ecuaciones × 8 variables")
+    st.write("")
+    st.write("**Variables:**")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}_{(2×1)},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}_{(3×1)},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}_{(3×1)}")
+    
+    # ========== 10. ECUACION DIFERENCIAL ==========
+    st.markdown("### 9. Ecuacion Diferencial del Circuito")
+    st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
+    st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
+    st.caption(f"Unidades: $V_C$ [V], $t$ [s], $dV_C/dt$ [V/s]")
+    
+    # ========== 11. VARIABLE DE ESTADO ==========
+    st.markdown("### 10. Variable de Estado")
+    st.latex(r"x(t) = V_C(t) \quad [V]")
+    st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
+    st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
+    
+    # ========== 12. ECUACION DE ESTADO ==========
+    st.markdown("### 11. Ecuacion de Estado")
+    A_val = -1/tau
+    B_val = 1/tau
+    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
+    st.latex(rf"\dot{{x}} = {A_val:.6f} x + {B_val:.6f} u \quad [V/s]")
+    st.latex(rf"u(t) = {Vin:.1f} \quad [V]")
+    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
+    st.latex(f"A = {A_val:.6f}\ [1/s],\quad B = {B_val:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
+    
+    # ========== 13. CLASIFICACION DEL SISTEMA ==========
+    st.markdown("### 12. Clasificacion del Sistema")
+    st.write(f"- **Orden:** Sistema de primer orden")
+    st.write(f"- **Linealidad:** Lineal")
+    st.write(f"- **Invarianza:** Invariante en el tiempo")
+    st.write(f"- **Tipo:** Pasa-bajas de primer orden")
+    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en $s = -{1/tau:.4f}$)")
+    
+    # ========== 14. INTERPRETACION FISICA ==========
+    st.markdown("### 13. Interpretacion Fisica")
+    st.markdown(f"""
+    - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
+    - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
+    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \\approx {Vin:.1f}$ V
+    - **Constante de tiempo:** $\\tau = {tau:.4f}$ s (63.2% de la carga final)
+    - **Comportamiento:** Respuesta exponencial creciente: $V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})$
+    """)
+    
+    # ========== 15. SOLUCION ANALITICA ==========
+    st.markdown("### 14. Solucion Analitica")
+    st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
