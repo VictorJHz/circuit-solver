@@ -298,3 +298,8 @@ with b4:
 with st.sidebar.expander("Instrucciones"):
     st.markdown("""
     **Netlist formato:**
+      V1 N0 N1 9
+      R1 N1 N2 27k
+      C1 N2 N0 100u
+**N0 es tierra**
+""")      
