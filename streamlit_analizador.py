@@ -345,6 +345,7 @@ def generar_reporte_rc(R, C, Vin, tau):
     **Convención de signos adoptada:**
     - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
     - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+    - **Convención de libro:** Las corrientes en resistencias fluyen del nodo de mayor potencial al de menor potencial
     """)
     
     st.markdown("### 1. Matriz de Incidencia A")
@@ -486,13 +487,12 @@ def generar_reporte_estatico(componentes):
             for i, nodo in enumerate(nodos_no_tierra):
                 voltajes_solver[nodo] = V_numerico[i]
             
-            # ========== PARTE 1: CONVENCIÓN LIBRO - TABLA ==========
-            st.markdown("### 📖 Resultados en Convención de Libro")
+            # ========== CONVENCIÓN LIBRO: V_libro = V_solver (sin cambio de signo) ==========
+            # En la convención de libro, los voltajes son los mismos que los calculados por el solver
+            voltajes_libro = voltajes_solver.copy()
             
-            # Voltajes de nodo en convención libro: V_libro = -V_solver
-            voltajes_libro = {}
-            for nodo, v in voltajes_solver.items():
-                voltajes_libro[nodo] = -v
+            # ========== PARTE 1: RESULTADOS - TABLA ==========
+            st.markdown("### 📖 Resultados en Convención de Libro")
             
             # Crear DataFrame para voltajes
             voltajes_df = pd.DataFrame([
@@ -500,11 +500,11 @@ def generar_reporte_estatico(componentes):
                 for nodo, v in voltajes_libro.items()
             ])
             st.dataframe(voltajes_df, use_container_width=True, hide_index=True)
-            st.caption("Nota: Convención libro considera V = -V_solver (nodo positivo con respecto a tierra)")
+            st.caption("Nota: Voltajes de nodo con respecto a tierra (N0 = 0V)")
             
-            # ========== PARTE 2: CORRIENTES EN RAMAS - TABLA ==========
+            # ========== PARTE 2: CORRIENTES EN RAMAS (CONVENCIÓN LIBRO) ==========
             st.markdown("### 🔄 Corrientes en Ramas (Convención Libro)")
-            st.caption("En convención libro, la corriente fluye del terminal positivo al negativo")
+            st.caption("La corriente fluye del nodo de mayor potencial al de menor potencial")
             
             corrientes_data = []
             for c in componentes:
@@ -514,6 +514,7 @@ def generar_reporte_estatico(componentes):
                     v_o_libro = voltajes_libro.get(nodo_o, 0)
                     v_d_libro = voltajes_libro.get(nodo_d, 0)
                     R = c['valor_total']
+                    # Corriente: I = (V_origen - V_destino) / R
                     i_libro = (v_o_libro - v_d_libro) / R
                     
                     if i_libro > 0:
@@ -526,7 +527,23 @@ def generar_reporte_estatico(componentes):
                     corrientes_data.append({
                         "Elemento": c['nombre'],
                         "Tipo": c['tipo'],
-                        "Corriente [A]": f"{abs(i_libro):.4f}",
+                        "Corriente [A]": f"{i_libro:.4f}",
+                        "Dirección": direccion
+                    })
+                elif c['tipo'] == "Fuente de Corriente":
+                    # Las fuentes de corriente tienen corriente fija
+                    I_val = c['valor_total']
+                    if c['nodo_origen'] != "N0" and c['nodo_destino'] != "N0":
+                        direccion = f"{c['nodo_origen']} → {c['nodo_destino']}"
+                    elif c['nodo_origen'] != "N0":
+                        direccion = f"{c['nodo_origen']} → N0"
+                    else:
+                        direccion = f"N0 → {c['nodo_destino']}"
+                    
+                    corrientes_data.append({
+                        "Elemento": c['nombre'],
+                        "Tipo": c['tipo'],
+                        "Corriente [A]": f"{I_val:.4f}",
                         "Dirección": direccion
                     })
             
@@ -556,9 +573,9 @@ def generar_reporte_estatico(componentes):
                             suma -= i_libro
                     
                     elif c['tipo'] == "Fuente de Corriente":
+                        I_val = c['valor_total']
                         nodo_o = c['nodo_origen']
                         nodo_d = c['nodo_destino']
-                        I_val = c['valor_total']
                         
                         if nodo_o == nodo:
                             suma += I_val
@@ -595,6 +612,7 @@ def generar_reporte_estatico(componentes):
                     i = v / c['valor_total']
                     P = v * i
                     
+                    # En resistencia, P siempre es positiva (disipación)
                     if P < 0:
                         P = -P
                         v = abs(v)
@@ -974,10 +992,8 @@ legend('iL(t)', 'Valor final');
                 n = len(nodos_no_tierra)
                 
                 if n > 0:
-                    # Construir matrices G e I simbólicamente
                     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
                     
-                    # Generar código MATLAB
                     matlab_code = f"""% Circuito Resistivo - Análisis Nodal
 clear; clc;
 
@@ -1022,15 +1038,6 @@ I = zeros({n},1);
                             if nodo_d != "N0":
                                 i = nodo_idx[nodo_d]
                                 matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
-                    
-                    # Agregar fuentes de voltaje (advertencia)
-                    tiene_fuente_v = any(c['tipo'] == "Fuente de Voltaje" for c in st.session_state.componentes)
-                    if tiene_fuente_v:
-                        matlab_code += """
-% NOTA: El circuito contiene fuentes de voltaje.
-% Este análisis nodal básico no las maneja directamente.
-% Se requiere el método de supernodo.
-"""
                     
                     matlab_code += """
 % Resolver sistema G*V = I
