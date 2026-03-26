@@ -232,26 +232,16 @@ def analizar_rc(cs):
     return (R, C, Vin) if None not in (R, C, Vin) else (None, None, None)
 
 def dibujar_grafo_formal(cs):
-    """
-    Genera un grafo formal del circuito con:
-    - Nodos: puntos de conexion
-    - Ramas: flechas con orientacion
-    - Polaridad: + en origen, - en destino
-    - Solo flechas, sin simbolos electricos
-    """
+    """Genera un grafo formal del circuito"""
     G = nx.MultiDiGraph()
     
-    # Obtener todos los nodos
     nodos = obtener_nodos(cs)
     for nodo in nodos:
         G.add_node(nodo)
     
-    # Asignar nombres de ramas (b1, b2, b3, ...)
     ramas_info = []
     for idx, c in enumerate(cs, 1):
         nombre_rama = f"b{idx}"
-        
-        # Determinar orientacion y polaridad
         origen = c['nodo_origen']
         destino = c['nodo_destino']
         
@@ -274,219 +264,6 @@ def dibujar_grafo_formal(cs):
     
     return G, nodos, ramas_info
 
-# ---------- BOTONES PRINCIPALES ----------
-st.subheader("Acciones")
-b1, b2, b3, b4 = st.columns(4)
-
-with b1:
-    if st.button("Mostrar Grafo Formal", key="mostrar_grafo"):
-        if not st.session_state.componentes:
-            st.warning("Agrega componentes")
-        else:
-            G, nodos, ramas_info = dibujar_grafo_formal(st.session_state.componentes)
-            
-            # Mostrar lista de nodos
-            st.subheader("📌 Nodos del Circuito")
-            st.write(f"Nodos identificados: {', '.join(nodos)}")
-            st.caption("N0 = Tierra (referencia)")
-            
-            # Mostrar lista de ramas
-            st.subheader("🔗 Ramas del Circuito")
-            ramas_df = []
-            for r in ramas_info:
-                ramas_df.append({
-                    "Rama": r["rama"],
-                    "Origen": r["origen"],
-                    "Destino": r["destino"],
-                    "Tipo": r["tipo"],
-                    "Tipo Eléctrico": r["tipo_elec"],
-                    "Componente": r["componente"],
-                    "Valor": r["valor"]
-                })
-            st.dataframe(ramas_df, use_container_width=True)
-            
-            # Grafico formal
-            st.subheader("📊 Grafo Formal del Circuito")
-            st.caption("Representación: Nodos = puntos | Ramas = flechas | + = origen | - = destino")
-            
-            fig, ax = plt.subplots(figsize=(14, 10))
-            
-            # Disposicion circular para mejor visualizacion
-            pos = nx.circular_layout(G)
-            
-            # Dibujar nodos
-            nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
-                                   node_size=3000, ax=ax, edgecolors='black', linewidths=2)
-            nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
-            
-            # Dibujar ramas (flechas)
-            edge_colors = []
-            edge_widths = []
-            for u, v, d in G.edges(data=True):
-                if d['tipo_elec'] == "Activo":
-                    edge_colors.append('orange')
-                    edge_widths.append(3)
-                else:
-                    edge_colors.append('gray')
-                    edge_widths.append(2)
-            
-            nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True,
-                                   arrowsize=25, arrowstyle='->', ax=ax, 
-                                   connectionstyle="arc3,rad=0.15", width=edge_widths)
-            
-            # Etiquetas de ramas (b1, b2, ...)
-            edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, 
-                                        font_size=10, ax=ax,
-                                        bbox=dict(boxstyle="round,pad=0.3", 
-                                                 facecolor="white", alpha=0.8))
-            
-            # Agregar signos de polaridad (+ y -) en cada rama
-            for u, v, d in G.edges(data=True):
-                # Calcular posicion media de la arista
-                x1, y1 = pos[u]
-                x2, y2 = pos[v]
-                xm = (x1 + x2) / 2
-                ym = (y1 + y2) / 2
-                
-                # Desplazar ligeramente para evitar solapamiento
-                dx = (x2 - x1) * 0.15
-                dy = (y2 - y1) * 0.15
-                
-                # Signo + en el origen
-                ax.text(x1 + dx*0.5, y1 + dy*0.5, '+', 
-                       fontsize=14, fontweight='bold', color='green',
-                       ha='center', va='center')
-                
-                # Signo - en el destino
-                ax.text(x2 - dx*0.5, y2 - dy*0.5, '-', 
-                       fontsize=14, fontweight='bold', color='red',
-                       ha='center', va='center')
-            
-            plt.title("Grafo Formal del Circuito", fontsize=16, fontweight='bold')
-            plt.axis('off')
-            
-            # Leyenda (corregida)
-            legend_elements = [
-                plt.Line2D([0], [0], color='orange', linewidth=3, label='Rama Activa (Fuente)'),
-                plt.Line2D([0], [0], color='gray', linewidth=2, label='Rama Pasiva (R, L, C)'),
-                plt.Line2D([0], [0], marker='+', color='green', markersize=12, linestyle='None', label='Polo Positivo (+)'),
-                plt.Line2D([0], [0], marker='_', color='red', markersize=12, linestyle='None', label='Polo Negativo (-)')
-            ]
-            ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
-            
-            st.pyplot(fig)
-            
-            # Informacion adicional
-            with st.expander("📖 Interpretacion del Grafo Formal"):
-                st.markdown(r"""
-                **Convenciones utilizadas:**
-                - **Nodos**: Puntos de conexion electrica (N0 = tierra)
-                - **Ramas**: Elementos del circuito representados como flechas
-                - **Direccion de la flecha**: Sentido de corriente positiva
-                - **+ (verde)**: Terminal positivo (origen) - voltaje mas alto
-                - **- (rojo)**: Terminal negativo (destino) - voltaje mas bajo
-                
-                **Para elementos pasivos (R, L, C):**
-                - La corriente entra por el terminal positivo (+)
-                
-                **Para elementos activos (fuentes):**
-                - La polaridad sigue la definicion de la fuente
-                - Fuente de voltaje: + en el nodo de mayor potencial
-                
-                **Relacion con analisis nodal:**
-                - $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
-                - La matriz de incidencia A se construye con +1 en origen, -1 en destino
-                """)
-
-with b2:
-    if st.button("Generar Ecuaciones", key="generar_eq"):
-        if not st.session_state.componentes:
-            st.warning("Agrega componentes")
-        else:
-            R, C, Vin = analizar_rc(st.session_state.componentes)
-            if R is not None and C is not None and Vin is not None:
-                generar_reporte_completo(R, C, Vin)
-            else:
-                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje.")
-                st.write("**Componentes actuales:**")
-                for c in st.session_state.componentes:
-                    st.write(f"- {c['nombre']}: {c['tipo']}")
-
-with b3:
-    if st.button("Codigo MATLAB", key="matlab"):
-        R, C, Vin = analizar_rc(st.session_state.componentes)
-        if R is not None and C is not None and Vin is not None:
-            tau = R * C
-            code = f"""% Circuito RC - Analisis Completo
-% Metodo de Tablueau en dominio tiempo
-clear; clc; close all;
-
-%% Parametros del circuito
-R = {R:.6f};  % Ohm
-C = {C:.6f};  % Faradios
-Vin = {Vin:.6f};  % Voltios
-tau = R * C;  % Constante de tiempo [s]
-
-%% Variable de estado
-syms Vc(t)
-eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
-cond = Vc(0) == 0;
-Vc_sol = dsolve(eq, cond);
-
-%% Resultados analiticos
-disp('=== SOLUCION DEL CIRCUITO RC ===');
-disp('Ecuacion diferencial:');
-disp(eq);
-fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
-disp(' ');
-pretty(Vc_sol);
-
-%% Forma de estado
-A = -1/tau;
-B = 1/tau;
-u = Vin;
-fprintf('\\n=== FORMA DE ESTADO ===\\n');
-fprintf('dx/dt = %.6f x + %.6f u\\n', A, B);
-fprintf('u(t) = %.2f [V] (entrada)\\n', u);
-fprintf('y(t) = x(t) [V] (salida)\\n');
-
-%% Parametros del sistema
-fprintf('\\n=== PARAMETROS DEL SISTEMA ===\\n');
-fprintf('Constante de tiempo tau = %.4f [s]\\n', tau);
-fprintf('Voltaje final en estado estable = %.2f [V]\\n', Vin);
-fprintf('Tiempo de establecimiento (5tau) = %.4f [s]\\n', 5*tau);
-fprintf('Velocidad de respuesta = 1/tau = %.4f [1/s]\\n', 1/tau);
-fprintf('Polo del sistema = s = -%.4f [1/s]\\n', 1/tau);
-
-%% Grafica de la respuesta
-figure('Position', [100, 100, 800, 500]);
-fplot(Vc_sol, [0 5*tau], 'LineWidth', 2, 'Color', 'b');
-xlabel('t [s]', 'FontSize', 12);
-ylabel('Vc(t) [V]', 'FontSize', 12);
-title('Respuesta del Circuito RC - Carga del Capacitor', 'FontSize', 14);
-grid on;
-hold on;
-plot([0 5*tau], [Vin Vin], '--r', 'LineWidth', 1.5);
-legend('Vc(t)', 'Vin', 'Location', 'best');
-
-%% Interpretacion fisica
-fprintf('\\n=== INTERPRETACION FISICA ===\\n');
-fprintf('El capacitor se carga desde 0 V hasta %.2f V\\n', Vin);
-fprintf('El regimen transitorio dura %.2f segundos (5τ)\\n', 5*tau);
-fprintf('La constante de tiempo τ = %.4f s representa el tiempo al 63.2%% de la carga final\\n', tau);
-"""
-            st.code(code, language="matlab")
-            st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab")
-        else:
-            st.info("Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para generar el codigo MATLAB.")
-
-with b4:
-    if st.button("Limpiar Todo", key="limpiar_todo"):
-        st.session_state.componentes = []
-        st.rerun()
-
-# ---------- FUNCION DE REPORTE ----------
 def generar_reporte_completo(R, C, Vin):
     """Genera el reporte completo con todos los bloques de analisis"""
     tau = R * C
@@ -605,3 +382,166 @@ def generar_reporte_completo(R, C, Vin):
     # ========== 15. SOLUCION ANALITICA ==========
     st.markdown("### 14. Solucion Analitica")
     st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
+
+# ---------- BOTONES PRINCIPALES ----------
+st.subheader("Acciones")
+b1, b2, b3, b4 = st.columns(4)
+
+with b1:
+    if st.button("Mostrar Grafo Formal", key="mostrar_grafo"):
+        if not st.session_state.componentes:
+            st.warning("Agrega componentes")
+        else:
+            G, nodos, ramas_info = dibujar_grafo_formal(st.session_state.componentes)
+            
+            st.subheader("📌 Nodos del Circuito")
+            st.write(f"Nodos identificados: {', '.join(nodos)}")
+            st.caption("N0 = Tierra (referencia)")
+            
+            st.subheader("🔗 Ramas del Circuito")
+            ramas_df = []
+            for r in ramas_info:
+                ramas_df.append({
+                    "Rama": r["rama"],
+                    "Origen": r["origen"],
+                    "Destino": r["destino"],
+                    "Tipo": r["tipo"],
+                    "Tipo Eléctrico": r["tipo_elec"],
+                    "Componente": r["componente"],
+                    "Valor": r["valor"]
+                })
+            st.dataframe(ramas_df, use_container_width=True)
+            
+            st.subheader("📊 Grafo Formal del Circuito")
+            st.caption("Representación: Nodos = puntos | Ramas = flechas | + = origen | - = destino")
+            
+            fig, ax = plt.subplots(figsize=(14, 10))
+            pos = nx.circular_layout(G)
+            
+            nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
+                                   node_size=3000, ax=ax, edgecolors='black', linewidths=2)
+            nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
+            
+            edge_colors = []
+            edge_widths = []
+            for u, v, d in G.edges(data=True):
+                if d['tipo_elec'] == "Activo":
+                    edge_colors.append('orange')
+                    edge_widths.append(3)
+                else:
+                    edge_colors.append('gray')
+                    edge_widths.append(2)
+            
+            nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True,
+                                   arrowsize=25, arrowstyle='->', ax=ax, 
+                                   connectionstyle="arc3,rad=0.15", width=edge_widths)
+            
+            edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, 
+                                        font_size=10, ax=ax,
+                                        bbox=dict(boxstyle="round,pad=0.3", 
+                                                 facecolor="white", alpha=0.8))
+            
+            for u, v, d in G.edges(data=True):
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                dx = (x2 - x1) * 0.15
+                dy = (y2 - y1) * 0.15
+                
+                ax.text(x1 + dx*0.5, y1 + dy*0.5, '+', 
+                       fontsize=14, fontweight='bold', color='green',
+                       ha='center', va='center')
+                ax.text(x2 - dx*0.5, y2 - dy*0.5, '-', 
+                       fontsize=14, fontweight='bold', color='red',
+                       ha='center', va='center')
+            
+            plt.title("Grafo Formal del Circuito", fontsize=16, fontweight='bold')
+            plt.axis('off')
+            
+            legend_elements = [
+                plt.Line2D([0], [0], color='orange', linewidth=3, label='Rama Activa (Fuente)'),
+                plt.Line2D([0], [0], color='gray', linewidth=2, label='Rama Pasiva (R, L, C)'),
+                plt.Line2D([0], [0], marker='+', color='green', markersize=12, linestyle='None', label='Polo Positivo (+)'),
+                plt.Line2D([0], [0], marker='_', color='red', markersize=12, linestyle='None', label='Polo Negativo (-)')
+            ]
+            ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+            
+            st.pyplot(fig)
+            
+            with st.expander("📖 Interpretacion del Grafo Formal"):
+                st.markdown(r"""
+                **Convenciones utilizadas:**
+                - **Nodos**: Puntos de conexion electrica (N0 = tierra)
+                - **Ramas**: Elementos del circuito representados como flechas
+                - **Direccion de la flecha**: Sentido de corriente positiva
+                - **+ (verde)**: Terminal positivo (origen) - voltaje mas alto
+                - **- (rojo)**: Terminal negativo (destino) - voltaje mas bajo
+                
+                **Relacion con analisis nodal:**
+                - $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+                - La matriz de incidencia A se construye con +1 en origen, -1 en destino
+                """)
+
+with b2:
+    if st.button("Generar Ecuaciones", key="generar_eq"):
+        if not st.session_state.componentes:
+            st.warning("Agrega componentes")
+        else:
+            R, C, Vin = analizar_rc(st.session_state.componentes)
+            if R is not None and C is not None and Vin is not None:
+                generar_reporte_completo(R, C, Vin)
+            else:
+                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje.")
+                st.write("**Componentes actuales:**")
+                for c in st.session_state.componentes:
+                    st.write(f"- {c['nombre']}: {c['tipo']}")
+
+with b3:
+    if st.button("Codigo MATLAB", key="matlab"):
+        R, C, Vin = analizar_rc(st.session_state.componentes)
+        if R is not None and C is not None and Vin is not None:
+            tau = R * C
+            code = f"""% Circuito RC - Analisis Completo
+clear; clc; close all;
+
+R = {R:.6f}; C = {C:.6f}; Vin = {Vin:.6f}; tau = R*C;
+
+syms Vc(t)
+eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
+cond = Vc(0) == 0;
+Vc_sol = dsolve(eq, cond);
+
+disp('=== SOLUCION DEL CIRCUITO RC ===');
+disp('Ecuacion diferencial:');
+disp(eq);
+fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
+pretty(Vc_sol);
+
+A = -1/tau; B = 1/tau; u = Vin;
+fprintf('\\n=== FORMA DE ESTADO ===\\n');
+fprintf('dx/dt = %.6f x + %.6f u\\n', A, B);
+fprintf('u(t) = %.2f [V] (entrada)\\n', u);
+
+fprintf('\\n=== PARAMETROS ===\\n');
+fprintf('tau = %.4f [s]\\n', tau);
+fprintf('Estado estable = %.2f [V]\\n', Vin);
+fprintf('5tau = %.4f [s]\\n', 5*tau);
+
+figure;
+fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
+xlabel('t [s]'); ylabel('Vc(t) [V]');
+title('Respuesta del Circuito RC');
+grid on;
+hold on;
+plot([0 5*tau], [Vin Vin], '--r');
+legend('Vc(t)', 'Vin');
+"""
+            st.code(code, language="matlab")
+            st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab")
+        else:
+            st.info("Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para generar el codigo MATLAB.")
+
+with b4:
+    if st.button("Limpiar Todo", key="limpiar_todo"):
+        st.session_state.componentes = []
+        st.rerun()
