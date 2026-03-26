@@ -251,25 +251,14 @@ def dibujar_grafo_formal(cs):
     for idx, c in enumerate(cs, 1):
         nombre_rama = f"b{idx}"
         
-        # Determinar orientacion y polaridad segun tipo de componente
-        if c['tipo_elec'] == "Activo":
-            # Componente activo: la polaridad sigue la fuente
-            # Para fuente de voltaje: el origen es positivo (+), destino negativo (-)
-            origen = c['nodo_origen']
-            destino = c['nodo_destino']
-            polaridad = f"+{origen} → -{destino}"
-        else:
-            # Componente pasivo: la corriente entra por el terminal positivo
-            # Convencion: el origen es el nodo de mayor potencial (positivo)
-            origen = c['nodo_origen']
-            destino = c['nodo_destino']
-            polaridad = f"+{origen} → -{destino}"
+        # Determinar orientacion y polaridad
+        origen = c['nodo_origen']
+        destino = c['nodo_destino']
         
         G.add_edge(origen, destino, 
                    label=nombre_rama,
                    tipo=c['tipo'],
                    tipo_elec=c['tipo_elec'],
-                   polaridad=polaridad,
                    nombre_comp=c['nombre'],
                    valor=f"{c['valor']}{c['prefijo']}{c['unidad']}")
         
@@ -331,7 +320,6 @@ with b1:
             nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
             
             # Dibujar ramas (flechas)
-            # Colores segun tipo de elemento
             edge_colors = []
             edge_widths = []
             for u, v, d in G.edges(data=True):
@@ -378,12 +366,12 @@ with b1:
             plt.title("Grafo Formal del Circuito", fontsize=16, fontweight='bold')
             plt.axis('off')
             
-            # Leyenda
+            # Leyenda (corregida)
             legend_elements = [
                 plt.Line2D([0], [0], color='orange', linewidth=3, label='Rama Activa (Fuente)'),
                 plt.Line2D([0], [0], color='gray', linewidth=2, label='Rama Pasiva (R, L, C)'),
-                plt.Line2D([0], [0], marker='+', color='green', markersize=10, linestyle='None', label='Polo Positivo (+)'),
-                plt.Line2D([0], [0], marker='-', color='red', markersize=10, linestyle='None', label='Polo Negativo (-)')
+                plt.Line2D([0], [0], marker='+', color='green', markersize=12, linestyle='None', label='Polo Positivo (+)'),
+                plt.Line2D([0], [0], marker='_', color='red', markersize=12, linestyle='None', label='Polo Negativo (-)')
             ]
             ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
             
@@ -391,7 +379,7 @@ with b1:
             
             # Informacion adicional
             with st.expander("📖 Interpretacion del Grafo Formal"):
-                st.markdown("""
+                st.markdown(r"""
                 **Convenciones utilizadas:**
                 - **Nodos**: Puntos de conexion electrica (N0 = tierra)
                 - **Ramas**: Elementos del circuito representados como flechas
@@ -407,7 +395,7 @@ with b1:
                 - Fuente de voltaje: + en el nodo de mayor potencial
                 
                 **Relacion con analisis nodal:**
-                - $v_{\\text{rama}} = e_{\\text{origen}} - e_{\\text{destino}}$
+                - $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
                 - La matriz de incidencia A se construye con +1 en origen, -1 en destino
                 """)
 
@@ -498,7 +486,7 @@ with b4:
         st.session_state.componentes = []
         st.rerun()
 
-# ---------- FUNCION DE REPORTE (mantenida igual) ----------
+# ---------- FUNCION DE REPORTE ----------
 def generar_reporte_completo(R, C, Vin):
     """Genera el reporte completo con todos los bloques de analisis"""
     tau = R * C
