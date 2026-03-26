@@ -1,7 +1,7 @@
 import streamlit as st
 import networkx as nx
 import matplotlib.pyplot as plt
-from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify, eye
+from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify
 import numpy as np
 import re
 import pandas as pd
@@ -84,25 +84,44 @@ def parsear_netlist(texto):
             errores.append(f"Línea {line_num}: Formato incorrecto")
             continue
         
-        nombre = parts[0]
-        letra = nombre[0].upper()
+        primero = parts[0]
         
-        if letra not in tipo_por_letra:
-            errores.append(f"Línea {line_num}: Tipo '{letra}' no reconocido")
+        if primero and primero[0] in tipo_por_letra:
+            letra = primero[0]
+            nombre = primero[1:] if len(primero) > 1 else primero
+            tipo = tipo_por_letra[letra]
+            if not nombre:
+                nombre = primero
+            
+            nodo_origen = parts[1] if len(parts) > 1 else None
+            nodo_destino = parts[2] if len(parts) > 2 else None
+            
+            valor_str = None
+            for i in range(3, len(parts)):
+                if re.search(r'[\d\.]', parts[i]):
+                    valor_str = parts[i]
+                    break
+            if not valor_str and len(parts) > 3:
+                valor_str = parts[3]
+        else:
+            letra = parts[0]
+            if letra not in tipo_por_letra:
+                errores.append(f"Línea {line_num}: Tipo '{letra}' no reconocido")
+                continue
+            tipo = tipo_por_letra[letra]
+            nombre = parts[1] if len(parts) > 1 else None
+            nodo_origen = parts[2] if len(parts) > 2 else None
+            nodo_destino = parts[3] if len(parts) > 3 else None
+            valor_str = parts[4] if len(parts) > 4 else None
+        
+        if not nombre:
+            errores.append(f"Línea {line_num}: Falta nombre")
             continue
-        
-        tipo = tipo_por_letra[letra]
-        nodo_origen = parts[1]
-        nodo_destino = parts[2]
-        
-        valor_str = None
-        for i in range(3, len(parts)):
-            if re.search(r'[\d\.]', parts[i]):
-                valor_str = parts[i]
-                break
-        
+        if not nodo_origen or not nodo_destino:
+            errores.append(f"Línea {line_num}: Faltan nodos")
+            continue
         if not valor_str:
-            errores.append(f"Línea {line_num}: No se encontró valor")
+            errores.append(f"Línea {line_num}: Falta valor")
             continue
         
         valor_total, prefijo = parse_valor(valor_str)
@@ -248,6 +267,11 @@ def construir_sistema_mna(componentes, nodos):
     Construye el sistema MNA completo:
     [G   B] [V]   [I]
     [B^T 0] [Iv] = [E]
+    
+    Convención:
+    - KCL: corriente positiva = entra al nodo
+    - Fuente de corriente: fluye de nodo_origen → nodo_destino
+    - Fuente de voltaje: B = +1 en origen, -1 en destino
     """
     nodos_no_tierra = [n for n in nodos if n != "N0"]
     n_nodos = len(nodos_no_tierra)
@@ -258,9 +282,6 @@ def construir_sistema_mna(componentes, nodos):
     
     # Mapeo de nodos a índices
     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
-    
-    # Tamaño del sistema MNA: n_nodos + m
-    N = n_nodos + m
     
     # Inicializar matrices
     G = zeros(n_nodos, n_nodos)  # Matriz de conductancias
@@ -311,11 +332,12 @@ def construir_sistema_mna(componentes, nodos):
         # Vector E: voltaje de la fuente
         E[idx_v, 0] = V_val
         
-        # Matriz B: incidencia de la fuente
+        # Matriz B: incidencia de la fuente (CORREGIDO)
+        # +1 en nodo_origen, -1 en nodo_destino (convención estándar)
         if nodo_o != "N0":
-            B[nodo_idx[nodo_o], idx_v] = 1   # Corriente sale del nodo origen
+            B[nodo_idx[nodo_o], idx_v] = 1    # Corriente sale del nodo origen
         if nodo_d != "N0":
-            B[nodo_idx[nodo_d], idx_v] = -1  # Corriente entra al nodo destino
+            B[nodo_idx[nodo_d], idx_v] = -1   # Corriente entra al nodo destino
     
     # ========== 4. CONSTRUIR SISTEMA MNA ==========
     # Matriz superior izquierda: [G, B]
@@ -343,29 +365,97 @@ def resolver_mna(M, b):
     except Exception as e:
         return None, str(e)
 
-def generar_reporte_estatico_mna(componentes):
-    """Genera reporte para circuitos estáticos usando MNA"""
-    st.subheader("📐 Análisis de Circuito Estático - Modified Nodal Analysis (MNA)")
+def generar_reporte_completo(componentes):
+    """Genera reporte completo del circuito con KCL, KVL, BR y sistema MNA"""
+    st.subheader("📐 Análisis de Circuito - Modified Nodal Analysis (MNA)")
     
+    nodos = obtener_nodos(componentes)
+    nodos_no_tierra = [n for n in nodos if n != "N0"]
+    fuentes_v = [c for c in componentes if c['tipo'] == "Fuente de Voltaje"]
+    
+    # Mostrar información del circuito
     st.write("**Componentes detectados:**")
     for c in componentes:
         st.write(f"- {c['nombre']}: {c['tipo']} = {c['valor']}{c['prefijo']}{c['unidad']}")
     
-    nodos = obtener_nodos(componentes)
-    nodos_no_tierra = [n for n in nodos if n != "N0"]
-    
-    # Construir sistema MNA
-    M, b, n_nodos, m, fuentes_v = construir_sistema_mna(componentes, nodos)
-    
     st.write(f"**Nodos:** {nodos_no_tierra} (N0 = tierra)")
     st.write(f"**Fuentes de voltaje:** {len(fuentes_v)}")
-    st.write(f"**Tamaño del sistema MNA:** {M.shape[0]} × {M.shape[1]}")
     
-    # Mostrar matrices
-    with st.expander("📊 Matrices del Sistema MNA"):
-        st.write("**Matriz M = [G, B; B^T, 0]**")
+    # ========== 1. CONVENCIÓN ==========
+    st.markdown("### 🔷 CONVENCIÓN ÚNICA Y CONSISTENTE")
+    st.markdown(r"""
+    **Convención de signos adoptada:**
+    - **KCL:** +1 = corriente que **entra** al nodo | -1 = corriente que **sale** del nodo
+    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+    - **Fuente de corriente:** La corriente fluye de $nodo_{origen} \rightarrow nodo_{destino}$
+    - **Fuente de voltaje:** Matriz B: +1 en $nodo_{origen}$, -1 en $nodo_{destino}$
+    """)
+    
+    # ========== 2. MATRIZ DE INCIDENCIA A ==========
+    st.markdown("### 1. Matriz de Incidencia A")
+    st.write("**Orden de ramas:** " + ", ".join([c['nombre'] for c in componentes]))
+    st.write("**Convención:** +1 = corriente sale, -1 = corriente entra")
+    
+    # Construir matriz A para mostrar
+    n_ramas = len(componentes)
+    A = zeros(len(nodos_no_tierra), n_ramas)
+    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
+    
+    for j, c in enumerate(componentes):
+        if c['nodo_origen'] != "N0":
+            A[nodo_idx[c['nodo_origen']], j] = 1
+        if c['nodo_destino'] != "N0":
+            A[nodo_idx[c['nodo_destino']], j] = -1
+    
+    st.latex(latex(A))
+    st.caption(f"Filas: nodos {nodos_no_tierra} | Columnas: ramas")
+    
+    # ========== 3. KCL EN FORMA MATRICIAL ==========
+    st.markdown("### 2. KCL en forma matricial")
+    st.latex(r"A \cdot i = 0")
+    st.caption("La suma algebraica de corrientes en cada nodo es cero")
+    
+    # ========== 4. KVL EN FORMA MATRICIAL ==========
+    st.markdown("### 3. KVL en forma matricial")
+    st.latex(r"v = A^T \cdot e")
+    st.latex(r"\begin{bmatrix} v_1 \\ v_2 \\ \vdots \\ v_{n} \end{bmatrix} = A^T \begin{bmatrix} V_{N1} \\ V_{N2} \\ \vdots \\ V_{Nn} \end{bmatrix}")
+    st.caption("Los voltajes de rama se expresan en función de los potenciales nodales")
+    
+    # ========== 5. RELACIONES DE COMPONENTES (BR) ==========
+    st.markdown("### 4. Relaciones de los Componentes (BR)")
+    for c in componentes:
+        if c['tipo'] == "Resistencia":
+            st.latex(rf"\text{{{c['nombre']}}}: \quad v_{{{c['nombre']}}} = {c['valor_total']:.0f} \cdot i_{{{c['nombre']}}} \quad [\Omega]")
+        elif c['tipo'] == "Fuente de Corriente":
+            st.latex(rf"\text{{{c['nombre']}}}: \quad i_{{{c['nombre']}}} = {c['valor_total']:.4f} \quad [A]")
+        elif c['tipo'] == "Fuente de Voltaje":
+            st.latex(rf"\text{{{c['nombre']}}}: \quad v_{{{c['nombre']}}} = {c['valor_total']:.4f} \quad [V]")
+        elif c['tipo'] == "Capacitor":
+            st.latex(rf"\text{{{c['nombre']}}}: \quad i_{{{c['nombre']}}} = {c['valor_total']:.0e} \cdot \frac{{dv_{{{c['nombre']}}}}}{{dt}} \quad [F]")
+        elif c['tipo'] == "Inductor":
+            st.latex(rf"\text{{{c['nombre']}}}: \quad v_{{{c['nombre']}}} = {c['valor_total']:.0e} \cdot \frac{{di_{{{c['nombre']}}}}}{{dt}} \quad [H]")
+    
+    # ========== 6. MATRIZ MNA ==========
+    st.markdown("### 5. Sistema MNA")
+    st.latex(r"\begin{bmatrix} G & B \\ B^T & 0 \end{bmatrix} \begin{bmatrix} V \\ I_v \end{bmatrix} = \begin{bmatrix} I \\ E \end{bmatrix}")
+    
+    # Construir y resolver
+    M, b, n_nodos, m, fuentes_v = construir_sistema_mna(componentes, nodos)
+    
+    st.write(f"**Tamaño del sistema:** {M.shape[0]} × {M.shape[1]}")
+    
+    with st.expander("📊 Ver matrices del sistema MNA"):
+        st.write("**Matriz G (conductancias):**")
+        st.latex(latex(G))
+        st.write("**Matriz B (incidencia de fuentes de voltaje):**")
+        st.latex(latex(B))
+        st.write("**Vector I (fuentes de corriente):**")
+        st.latex(latex(I))
+        st.write("**Vector E (fuentes de voltaje):**")
+        st.latex(latex(E))
+        st.write("**Matriz M completa:**")
         st.latex(latex(M))
-        st.write("**Vector b = [I; E]**")
+        st.write("**Vector b:**")
         st.latex(latex(b))
     
     # Resolver
@@ -384,11 +474,11 @@ def generar_reporte_estatico_mna(componentes):
     for i, fv in enumerate(fuentes_v):
         corrientes_fuentes_v[fv['nombre']] = float(sol[n_nodos + i, 0])
     
-    # ========== PARTE 1: RESULTADOS ==========
-    st.markdown("### 📖 Resultados")
+    # ========== 7. RESULTADOS ==========
+    st.markdown("### 📊 Resultados")
     
     # Voltajes nodales
-    st.write("**Voltajes nodales:**")
+    st.write("**Voltajes de nodo (convención libro):**")
     voltajes_df = pd.DataFrame([
         {"Nodo": nodo, "Voltaje [V]": f"{v:.4f}"}
         for nodo, v in voltajes.items()
@@ -404,7 +494,7 @@ def generar_reporte_estatico_mna(componentes):
         ])
         st.dataframe(corrientes_fv_df, use_container_width=True, hide_index=True)
     
-    # ========== PARTE 2: CORRIENTES EN RESISTENCIAS ==========
+    # ========== 8. CORRIENTES EN RAMAS ==========
     st.markdown("### 🔄 Corrientes en Ramas")
     
     corrientes_data = []
@@ -415,11 +505,11 @@ def generar_reporte_estatico_mna(componentes):
             v_o = voltajes.get(nodo_o, 0)
             v_d = voltajes.get(nodo_d, 0)
             R = c['valor_total']
-            i_libro = (v_o - v_d) / R
+            i = (v_o - v_d) / R
             
-            if i_libro > 0:
+            if i > 0:
                 direccion = f"{nodo_o} → {nodo_d}"
-            elif i_libro < 0:
+            elif i < 0:
                 direccion = f"{nodo_d} → {nodo_o}"
             else:
                 direccion = "Cero"
@@ -427,7 +517,7 @@ def generar_reporte_estatico_mna(componentes):
             corrientes_data.append({
                 "Elemento": c['nombre'],
                 "Tipo": c['tipo'],
-                "Corriente [A]": f"{i_libro:.4f}",
+                "Corriente [A]": f"{i:.4f}",
                 "Dirección": direccion
             })
         elif c['tipo'] == "Fuente de Corriente":
@@ -465,7 +555,7 @@ def generar_reporte_estatico_mna(componentes):
         corrientes_df = pd.DataFrame(corrientes_data)
         st.dataframe(corrientes_df, use_container_width=True, hide_index=True)
     
-    # ========== PARTE 3: VALIDACIÓN KCL ==========
+    # ========== 9. VALIDACIÓN KCL ==========
     st.markdown("### ✅ Validación KCL")
     st.caption("KCL: Suma de corrientes que entran al nodo = 0")
     
@@ -522,7 +612,7 @@ def generar_reporte_estatico_mna(componentes):
         kcl_df = pd.DataFrame(kcl_data)
         st.dataframe(kcl_df, use_container_width=True, hide_index=True)
     
-    # ========== PARTE 4: POTENCIAS ==========
+    # ========== 10. POTENCIAS ==========
     st.markdown("### ⚡ Potencias en Elementos")
     
     potencias_data = []
@@ -600,7 +690,7 @@ def generar_reporte_estatico_mna(componentes):
         potencias_df = pd.DataFrame(potencias_data)
         st.dataframe(potencias_df, use_container_width=True, hide_index=True)
     
-    # ========== PARTE 5: BALANCE DE POTENCIA ==========
+    # ========== 11. BALANCE DE POTENCIA ==========
     st.markdown("### ⚖️ Balance de Potencia")
     
     potencia_total_disipada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Disipa" in p["Comportamiento"])
@@ -620,7 +710,41 @@ def generar_reporte_estatico_mna(componentes):
     else:
         st.warning("⚠️ Balance de potencia no verificado")
 
-# ---------- FUNCIONES EXISTENTES PARA CIRCUITOS DINÁMICOS ----------
+# ---------- FUNCIONES DE GRÁFICO ----------
+def dibujar_grafo_formal(cs):
+    """Genera un grafo formal del circuito"""
+    G = nx.MultiDiGraph()
+    
+    nodos = obtener_nodos(cs)
+    for nodo in nodos:
+        G.add_node(nodo)
+    
+    ramas_info = []
+    for idx, c in enumerate(cs, 1):
+        nombre_rama = f"b{idx}"
+        origen = c['nodo_origen']
+        destino = c['nodo_destino']
+        
+        G.add_edge(origen, destino, 
+                   label=nombre_rama,
+                   tipo=c['tipo'],
+                   tipo_elec=c['tipo_elec'],
+                   nombre_comp=c['nombre'],
+                   valor=f"{c['valor']}{c['prefijo']}{c['unidad']}")
+        
+        ramas_info.append({
+            "rama": nombre_rama,
+            "origen": origen,
+            "destino": destino,
+            "tipo": c['tipo'],
+            "tipo_elec": c['tipo_elec'],
+            "componente": c['nombre'],
+            "valor": f"{c['valor']}{c['prefijo']}{c['unidad']}"
+        })
+    
+    return G, nodos, ramas_info
+
+# ---------- FUNCIONES PARA CIRCUITOS DINÁMICOS ESPECIALES ----------
 def verificar_circuito_rc_valido(componentes):
     """Verifica si el circuito es un RC serie válido (1R, 1C, 1V en serie)"""
     num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
@@ -683,109 +807,36 @@ def verificar_circuito_rl_valido(componentes):
     
     return True
 
-def verificar_circuito_rlc_valido(componentes):
-    """Verifica si el circuito es un RLC serie válido (1R, 1L, 1C, 1V en serie)"""
-    num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
-    num_ind = sum(1 for c in componentes if c['tipo'] == "Inductor")
-    num_cap = sum(1 for c in componentes if c['tipo'] == "Capacitor")
-    num_fuente_v = sum(1 for c in componentes if c['tipo'] == "Fuente de Voltaje")
-    num_fuente_i = sum(1 for c in componentes if c['tipo'] == "Fuente de Corriente")
-    
-    if num_res != 1 or num_ind != 1 or num_cap != 1 or num_fuente_v != 1 or num_fuente_i != 0:
-        return False
-    
-    R = next(c for c in componentes if c['tipo'] == "Resistencia")
-    L = next(c for c in componentes if c['tipo'] == "Inductor")
-    C = next(c for c in componentes if c['tipo'] == "Capacitor")
-    V = next(c for c in componentes if c['tipo'] == "Fuente de Voltaje")
-    
-    G = nx.Graph()
-    for comp in [R, L, C, V]:
-        G.add_edge(comp['nodo_origen'], comp['nodo_destino'])
-    
-    if nx.number_connected_components(G) != 1:
-        return False
-    
-    nodos = set()
-    for comp in [R, L, C, V]:
-        nodos.add(comp['nodo_origen'])
-        nodos.add(comp['nodo_destino'])
-    
-    if len(nodos) != 3:
-        return False
-    
-    return True
-
 def generar_reporte_rc(R, C, Vin, tau):
     """Genera reporte completo para circuito RC"""
-    st.markdown("### 🔷 CONVENCIÓN ÚNICA Y CONSISTENTE")
-    st.markdown(r"""
-    **Convención de signos adoptada:**
-    - **KCL:** +1 = corriente que entra al nodo
-    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
-    - **Convención de libro:** Las corrientes en resistencias fluyen del nodo de mayor potencial al de menor potencial
-    """)
-    
-    st.markdown("### 1. Matriz de Incidencia A")
+    st.markdown("### 🔷 Circuito RC - Análisis Completo")
     st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
-    
-    st.markdown("### 2. KCL en forma matricial")
-    st.latex(r"A \cdot i = 0")
-    
-    st.markdown("### 3. KVL en forma matricial")
-    st.latex(r"v = A^T \cdot e")
-    
-    st.markdown("### 4. Relaciones de los Componentes (BR)")
-    st.latex(r"\text{Fuente:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
-    st.latex(r"\text{Resistencia:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
-    st.latex(r"\text{Capacitor:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
-    
-    st.markdown("### 5. Ecuación Diferencial")
-    st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+    st.latex(r"i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}")
+    st.latex(r"v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
+    st.latex(r"v_{V1}=V_{in},\quad v_{R1}=R i_{R1},\quad i_{C1}=C\frac{dv_{C1}}{dt}")
     st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
-    
-    st.markdown("### 6. Variable de Estado")
-    st.latex(r"x(t) = V_C(t)")
-    
-    st.markdown("### 7. Ecuación de Estado")
-    st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
-    
-    st.markdown("### 8. Solución Analítica")
-    st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
+    st.latex(rf"V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})")
 
 def generar_reporte_rl(R, L, Vin, tau):
     """Genera reporte para circuito RL"""
-    st.markdown("### 🔷 Circuito RL Serie")
-    
-    st.markdown("### 1. Relaciones de los Componentes")
-    st.latex(r"\text{Fuente:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
-    st.latex(r"\text{Resistencia:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
-    st.latex(r"\text{Inductor:} \quad v_{L1} = L \cdot \frac{d i_{L1}}{dt} = " + f"{L:.0e}" + r"\ H \cdot \frac{d i_{L1}}{dt}")
-    
-    st.markdown("### 2. Ecuación Diferencial")
-    st.latex(rf"{Vin:.1f} = {R:.0f} \cdot i_L + {L:.0e} \cdot \frac{{di_L}}{{dt}}")
+    st.markdown("### 🔷 Circuito RL - Análisis Completo")
+    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+    st.latex(r"i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{L1} \end{bmatrix}")
+    st.latex(r"v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{L1} \end{bmatrix}")
+    st.latex(r"v_{V1}=V_{in},\quad v_{R1}=R i_{R1},\quad v_{L1}=L\frac{di_{L1}}{dt}")
     st.latex(rf"\frac{{di_L}}{{dt}} + \frac{{1}}{{{tau:.4f}}} i_L = \frac{{{Vin:.1f}}}{{{L:.0e}}}")
-    
-    st.markdown("### 3. Variable de Estado")
-    st.latex(r"x(t) = i_L(t) \quad [A]")
-    
-    st.markdown("### 4. Ecuación de Estado")
-    st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{L:.0e}}}")
-    
-    st.markdown("### 5. Solución Analítica")
-    st.latex(f"i_L(t) = {Vin/R:.4f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [A]")
+    st.latex(rf"i_L(t) = {Vin/R:.4f}(1 - e^{{-t/{tau:.4f}}})")
 
 def generar_reporte_rlc(R, L, C, Vin):
     """Genera reporte para circuito RLC"""
     alpha = R / (2 * L)
     omega0 = 1 / np.sqrt(L * C)
     
-    st.markdown("### 🔷 Circuito RLC Serie")
-    
-    st.markdown("### 1. Ecuación Diferencial")
-    st.latex(rf"L C \frac{{d^2 v_C}}{{dt^2}} + R C \frac{{d v_C}}{{dt}} + v_C = V_{{in}}")
-    
-    st.markdown("### 2. Parámetros del Sistema")
+    st.markdown("### 🔷 Circuito RLC - Análisis Completo")
+    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+    st.latex(r"L C \frac{{d^2 v_C}}{{dt^2}} + R C \frac{{d v_C}}{{dt}} + v_C = V_{{in}}")
     st.write(f"- **Frecuencia natural:** $\\omega_0 = {omega0:.4f}$ rad/s")
     st.write(f"- **Factor de amortiguamiento:** $\\alpha = {alpha:.4f}$")
     st.write(f"- **Coeficiente de amortiguamiento:** $\\zeta = {alpha/omega0:.4f}$")
@@ -796,9 +847,6 @@ def generar_reporte_rlc(R, L, C, Vin):
         st.write("- **Tipo:** Críticamente amortiguado")
     else:
         st.write("- **Tipo:** Sobreamortiguado")
-    
-    st.markdown("### 3. Variable de Estado")
-    st.latex(r"x_1(t) = v_C(t), \quad x_2(t) = i_L(t)")
 
 def generar_reporte_dinamico(componentes, subtipo, orden):
     """Genera reporte para circuitos dinámicos"""
@@ -826,96 +874,12 @@ def generar_reporte_dinamico(componentes, subtipo, orden):
         tau = L_val / R_val
         generar_reporte_rl(R_val, L_val, Vin_val, tau)
     
-    elif subtipo == "RLC" and verificar_circuito_rlc_valido(componentes):
+    elif subtipo == "RLC" and R_val and L_val and C_val and Vin_val:
         generar_reporte_rlc(R_val, L_val, C_val, Vin_val)
     
     else:
-        st.info("Circuito dinámico general - análisis básico")
-        st.write("**Ecuaciones del circuito:**")
-        
-        t = symbols('t')
-        nodos = obtener_nodos(componentes)
-        
-        v_nodos = {}
-        for nodo in nodos:
-            if nodo != "N0":
-                v_nodos[nodo] = Function(f'V_{nodo}')(t)
-        
-        i_componentes = {}
-        for c in componentes:
-            if c['needs_current']:
-                i_componentes[c['nombre']] = Function(f'i_{c["nombre"]}')(t)
-        
-        for nodo in nodos:
-            if nodo == "N0":
-                continue
-            suma = 0
-            for c in componentes:
-                if c['nodo_origen'] == nodo:
-                    suma += i_componentes[c['nombre']]
-                elif c['nodo_destino'] == nodo:
-                    suma -= i_componentes[c['nombre']]
-            if suma != 0:
-                st.latex(latex(Eq(suma, 0)))
-        
-        for c in componentes:
-            nombre = c['nombre']
-            tipo = c['tipo']
-            valor = c['valor_total']
-            nodo_o = c['nodo_origen']
-            nodo_d = c['nodo_destino']
-            
-            v_o = 0 if nodo_o == "N0" else v_nodos[nodo_o]
-            v_d = 0 if nodo_d == "N0" else v_nodos[nodo_d]
-            v_diff = v_o - v_d
-            
-            if tipo == "Resistencia":
-                st.latex(latex(Eq(v_diff, valor * i_componentes[nombre])))
-            elif tipo == "Capacitor":
-                st.latex(latex(Eq(i_componentes[nombre], valor * Derivative(v_diff, t))))
-            elif tipo == "Inductor":
-                st.latex(latex(Eq(v_diff, valor * Derivative(i_componentes[nombre], t))))
-            elif tipo == "Fuente de Voltaje":
-                if nodo_o == "N0":
-                    st.latex(latex(Eq(v_d - v_o, valor)))
-                else:
-                    st.latex(latex(Eq(v_diff, valor)))
-            elif tipo == "Fuente de Corriente":
-                st.latex(latex(Eq(i_componentes[nombre], valor)))
-
-# ---------- FUNCIONES DE GRAFICO ----------
-def dibujar_grafo_formal(cs):
-    """Genera un grafo formal del circuito"""
-    G = nx.MultiDiGraph()
-    
-    nodos = obtener_nodos(cs)
-    for nodo in nodos:
-        G.add_node(nodo)
-    
-    ramas_info = []
-    for idx, c in enumerate(cs, 1):
-        nombre_rama = f"b{idx}"
-        origen = c['nodo_origen']
-        destino = c['nodo_destino']
-        
-        G.add_edge(origen, destino, 
-                   label=nombre_rama,
-                   tipo=c['tipo'],
-                   tipo_elec=c['tipo_elec'],
-                   nombre_comp=c['nombre'],
-                   valor=f"{c['valor']}{c['prefijo']}{c['unidad']}")
-        
-        ramas_info.append({
-            "rama": nombre_rama,
-            "origen": origen,
-            "destino": destino,
-            "tipo": c['tipo'],
-            "tipo_elec": c['tipo_elec'],
-            "componente": c['nombre'],
-            "valor": f"{c['valor']}{c['prefijo']}{c['unidad']}"
-        })
-    
-    return G, nodos, ramas_info
+        # Para circuitos dinámicos complejos, usar MNA general
+        generar_reporte_completo(componentes)
 
 # ---------- BOTONES PRINCIPALES ----------
 st.subheader("Acciones")
@@ -1007,18 +971,12 @@ with b2:
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
-            # Mostrar componentes para depuración
-            st.write("**Componentes detectados:**")
-            for c in st.session_state.componentes:
-                st.write(f"- {c['nombre']}: {c['tipo']} = {c['valor']}{c['prefijo']}{c['unidad']}")
-            
-            # Clasificar el circuito
             tipo_sistema, subtipo, orden = clasificar_circuito(st.session_state.componentes)
             
             st.info(f"**Tipo de sistema:** {tipo_sistema} | **Subtipo:** {subtipo} | **Orden:** {orden}")
             
             if tipo_sistema == "Estático":
-                generar_reporte_estatico_mna(st.session_state.componentes)
+                generar_reporte_completo(st.session_state.componentes)
             else:
                 generar_reporte_dinamico(st.session_state.componentes, subtipo, orden)
 
@@ -1041,31 +999,19 @@ with b3:
                 
                 if R and C and Vin:
                     tau = R * C
-                    code = f"""% Circuito RC - Análisis Completo
-clear; clc; close all;
-
-R = {R:.6f}; C = {C:.6f}; Vin = {Vin:.6f}; tau = R*C;
-
+                    code = f"""% Circuito RC
+clear; clc;
 syms Vc(t)
-eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
-cond = Vc(0) == 0;
-Vc_sol = dsolve(eq, cond);
-
-disp('=== SOLUCIÓN DEL CIRCUITO RC ===');
-fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
-pretty(Vc_sol);
-
-figure;
-fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
-xlabel('t [s]'); ylabel('Vc(t) [V]');
-title('Respuesta del Circuito RC');
-grid on;
-hold on;
-plot([0 5*tau], [Vin Vin], '--r');
-legend('Vc(t)', 'Vin');
+R={R:.6f}; C={C:.6f}; Vin={Vin:.6f}; tau=R*C;
+eq = diff(Vc,t) == -1/tau*Vc + Vin/tau;
+cond = Vc(0)==0;
+Vc_sol = dsolve(eq,cond);
+fplot(Vc_sol, [0 5*tau])
+xlabel('t(s)'); ylabel('Vc(V)')
+grid on
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar código MATLAB", code, "circuito_rc.m", key="descargar_matlab_rc")
+                    st.download_button("Descargar", code, "circuito_rc.m", key="descargar_matlab_rc")
                 else:
                     st.info("No se detectó un circuito RC válido")
             
@@ -1081,139 +1027,111 @@ legend('Vc(t)', 'Vin');
                 
                 if R and L and Vin:
                     tau = L / R
-                    code = f"""% Circuito RL - Análisis Completo
-clear; clc; close all;
-
-R = {R:.6f}; L = {L:.6f}; Vin = {Vin:.6f}; tau = L/R;
-
+                    code = f"""% Circuito RL
+clear; clc;
 syms iL(t)
-eq = diff(iL, t) == -1/tau * iL + Vin/L;
-cond = iL(0) == 0;
-iL_sol = dsolve(eq, cond);
-
-disp('=== SOLUCIÓN DEL CIRCUITO RL ===');
-fprintf('iL(t) = %.4f * (1 - exp(-t/%.4f)) [A]\\n', Vin/R, tau);
-pretty(iL_sol);
-
-figure;
-fplot(iL_sol, [0 5*tau], 'LineWidth', 2);
-xlabel('t [s]'); ylabel('iL(t) [A]');
-title('Respuesta del Circuito RL');
-grid on;
-hold on;
-plot([0 5*tau], [Vin/R Vin/R], '--r');
-legend('iL(t)', 'Valor final');
+R={R:.6f}; L={L:.6f}; Vin={Vin:.6f}; tau=L/R;
+eq = diff(iL,t) == -1/tau*iL + Vin/L;
+cond = iL(0)==0;
+iL_sol = dsolve(eq,cond);
+fplot(iL_sol, [0 5*tau])
+xlabel('t(s)'); ylabel('iL(A)')
+grid on
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar código MATLAB", code, "circuito_rl.m", key="descargar_matlab_rl")
+                    st.download_button("Descargar", code, "circuito_rl.m", key="descargar_matlab_rl")
                 else:
                     st.info("No se detectó un circuito RL válido")
             
             else:
-                # Generar código MATLAB para MNA general
+                # Para cualquier otro circuito, generar código MNA
                 nodos = obtener_nodos(st.session_state.componentes)
                 nodos_no_tierra = [n for n in nodos if n != "N0"]
-                n_nodos = len(nodos_no_tierra)
                 fuentes_v = [c for c in st.session_state.componentes if c['tipo'] == "Fuente de Voltaje"]
+                n_nodos = len(nodos_no_tierra)
                 m = len(fuentes_v)
                 
                 if n_nodos > 0:
                     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
                     
-                    matlab_code = f"""% Circuito General - Modified Nodal Analysis (MNA)
+                    code = f"""% Circuito General - Modified Nodal Analysis (MNA)
 clear; clc;
 
 % Nodos: {n_nodos}
 % Fuentes de voltaje: {m}
 % Tamaño del sistema MNA: {n_nodos + m}
 
-% Inicializar matrices
 G = zeros({n_nodos},{n_nodos});
 B = zeros({n_nodos},{m});
 I = zeros({n_nodos},1);
 E = zeros({m},1);
 
 """
-                    # Agregar resistencias
                     for c in st.session_state.componentes:
                         if c['tipo'] == "Resistencia":
                             G_val = 1 / c['valor_total']
                             nodo_o = c['nodo_origen']
                             nodo_d = c['nodo_destino']
-                            
                             if nodo_o != "N0" and nodo_d != "N0":
                                 i = nodo_idx[nodo_o]
                                 j = nodo_idx[nodo_d]
-                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
-                                matlab_code += f"G({j+1},{j+1}) = G({j+1},{j+1}) + {G_val:.6f};\n"
-                                matlab_code += f"G({i+1},{j+1}) = G({i+1},{j+1}) - {G_val:.6f};\n"
-                                matlab_code += f"G({j+1},{i+1}) = G({j+1},{i+1}) - {G_val:.6f};\n"
+                                code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                                code += f"G({j+1},{j+1}) = G({j+1},{j+1}) + {G_val:.6f};\n"
+                                code += f"G({i+1},{j+1}) = G({i+1},{j+1}) - {G_val:.6f};\n"
+                                code += f"G({j+1},{i+1}) = G({j+1},{i+1}) - {G_val:.6f};\n"
                             elif nodo_o != "N0":
                                 i = nodo_idx[nodo_o]
-                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                                code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
                             elif nodo_d != "N0":
                                 i = nodo_idx[nodo_d]
-                                matlab_code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
+                                code += f"G({i+1},{i+1}) = G({i+1},{i+1}) + {G_val:.6f};\n"
                     
-                    # Agregar fuentes de corriente
                     for c in st.session_state.componentes:
                         if c['tipo'] == "Fuente de Corriente":
                             I_val = c['valor_total']
                             nodo_o = c['nodo_origen']
                             nodo_d = c['nodo_destino']
-                            
                             if nodo_o != "N0":
                                 i = nodo_idx[nodo_o]
-                                matlab_code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
+                                code += f"I({i+1}) = I({i+1}) - {I_val:.6f};\n"
                             if nodo_d != "N0":
                                 i = nodo_idx[nodo_d]
-                                matlab_code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"
+                                code += f"I({i+1}) = I({i+1}) + {I_val:.6f};\n"
                     
-                    # Agregar fuentes de voltaje
                     for idx_v, c in enumerate(fuentes_v):
                         V_val = c['valor_total']
                         nodo_o = c['nodo_origen']
                         nodo_d = c['nodo_destino']
-                        
-                        matlab_code += f"E({idx_v+1}) = {V_val:.6f};\n"
-                        
+                        code += f"E({idx_v+1}) = {V_val:.6f};\n"
                         if nodo_o != "N0":
                             i = nodo_idx[nodo_o]
-                            matlab_code += f"B({i+1},{idx_v+1}) = 1;\n"
+                            code += f"B({i+1},{idx_v+1}) = 1;\n"
                         if nodo_d != "N0":
                             i = nodo_idx[nodo_d]
-                            matlab_code += f"B({i+1},{idx_v+1}) = -1;\n"
+                            code += f"B({i+1},{idx_v+1}) = -1;\n"
                     
-                    matlab_code += """
-% Construir sistema MNA
+                    code += """
 M = [G, B; B', zeros(size(B,2))];
 b = [I; E];
-
-% Resolver sistema
 x = M \\ b;
 
-% Extraer resultados
 n_nodos = size(G,1);
-m = size(B,2);
 V = x(1:n_nodos);
 Iv = x(n_nodos+1:end);
 
-% Mostrar resultados
 disp('=== SOLUCIÓN DEL CIRCUITO ===');
 disp('Voltajes nodales:');
 """
                     for i, nodo in enumerate(nodos_no_tierra):
-                        matlab_code += f"fprintf('V_{nodo} = %.4f V\\n', V({i+1}));\n"
+                        code += f"fprintf('V_{nodo} = %.4f V\\n', V({i+1}));\n"
                     
                     if m > 0:
-                        matlab_code += """
-disp('\\nCorrientes en fuentes de voltaje:');
-"""
+                        code += "\ndisp('Corrientes en fuentes de voltaje:');\n"
                         for idx_v, c in enumerate(fuentes_v):
-                            matlab_code += f"fprintf('{c['nombre']}: i = %.4f A\\n', Iv({idx_v+1}));\n"
+                            code += f"fprintf('{c['nombre']}: i = %.4f A\\n', Iv({idx_v+1}));\n"
                     
-                    st.code(matlab_code, language="matlab")
-                    st.download_button("Descargar código MATLAB", matlab_code, "circuito_mna.m", key="descargar_matlab_mna")
+                    st.code(code, language="matlab")
+                    st.download_button("Descargar", code, "circuito_mna.m", key="descargar_matlab_mna")
                 else:
                     st.info("Circuito sin nodos válidos para análisis")
 
