@@ -26,15 +26,11 @@ componentes_disponibles = {
 prefijos = {"": 1, "p": 1e-12, "n": 1e-9, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 prefijos_regex = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
-# ---------- FUNCIONES NETLIST CORREGIDAS ----------
+# ---------- FUNCIONES NETLIST ----------
 def parse_valor(valor_str):
-    """Parsea valores como 9, 27k, 100u, 2.2M correctamente"""
     if not valor_str:
         return None, None
     valor_str = valor_str.strip().lower()
-    
-    # Buscar patron: numero + prefijo (p, n, u, m, k, M) o solo numero
-    # El prefijo puede ser p, n, u, m, k, M
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
         num_str, pref = match.groups()
@@ -74,7 +70,6 @@ def parsear_netlist(texto):
         if not line or line.startswith('#') or line.startswith(';'):
             continue
         
-        # Eliminar comentarios
         if '#' in line:
             line = line.split('#')[0].strip()
         if ';' in line:
@@ -85,26 +80,23 @@ def parsear_netlist(texto):
             
         parts = line.split()
         if len(parts) < 4:
-            errores.append(f"Linea {line_num}: Formato incorrecto (minimo 4 campos)")
+            errores.append(f"Linea {line_num}: Formato incorrecto")
             continue
         
-        # El primer campo es el nombre del componente (V1, R1, C1)
         nombre = parts[0]
         letra = nombre[0].upper()
         
         if letra not in tipo_por_letra:
-            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido (use V, R, C, L, I)")
+            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
             continue
         
         tipo = tipo_por_letra[letra]
         nodo_origen = parts[1]
         nodo_destino = parts[2]
         
-        # Buscar el valor (puede estar en pos 3 o 4 si hay DC/AC)
         valor_str = None
         for i in range(3, len(parts)):
-            # Buscar algo que parezca un numero con prefijo (ej: 27k, 100u, 9)
-            if re.search(r'[\d\.]+[pnumkM]?', parts[i]):
+            if re.search(r'[\d\.]', parts[i]):
                 valor_str = parts[i]
                 break
         
@@ -112,13 +104,11 @@ def parsear_netlist(texto):
             errores.append(f"Linea {line_num}: No se encontro valor")
             continue
         
-        # Parsear valor (ahora con prefijo correcto)
         valor_total, prefijo = parse_valor(valor_str)
         if valor_total is None:
             errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
             continue
         
-        # Obtener el valor base para mostrar (sin prefijo)
         mult = prefijos_regex.get(prefijo, 1)
         valor_base = valor_total / mult if mult != 1 else valor_total
         
@@ -136,9 +126,6 @@ def parsear_netlist(texto):
             "nodo_destino": nodo_destino,
             "needs_current": componentes_disponibles[tipo]["needs_current"]
         })
-        
-        # Debug opcional
-        st.sidebar.write(f"DEBUG: {nombre} = {valor_base}{prefijo} = {valor_total}")
     
     return componentes, errores
 
@@ -194,7 +181,6 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
                     for c in nuevos:
                         if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
                             st.session_state.componentes.append(c)
-                            st.sidebar.success(f"Agregado {c['nombre']} ({c['tipo']})")
                     st.rerun()
             else:
                 st.sidebar.warning("Netlist vacio")
@@ -312,7 +298,7 @@ def generar_reporte_completo(R, C, Vin):
     st.write("**Forma integral equivalente del capacitor:**")
     st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
     
-    # ========== 7. MATRIZ Z (OPERADOR) - CORREGIDA ==========
+    # ========== 7. MATRIZ Z (OPERADOR) ==========
     st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
     st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \cdot \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
     st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
@@ -322,7 +308,7 @@ def generar_reporte_completo(R, C, Vin):
     st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
     st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
     
-    # ========== 9. METODO DE TABLEAU - ESTRUCTURA EN BLOQUES ==========
+    # ========== 9. METODO DE TABLEAU ==========
     st.markdown("### 8. Metodo de Tablueau - Estructura en Bloques")
     st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
     st.write("")
@@ -350,11 +336,11 @@ def generar_reporte_completo(R, C, Vin):
     # ========== 12. ECUACION DE ESTADO (CORREGIDA) ==========
     st.markdown("### 11. Ecuacion de Estado")
     A = -1/tau
-    B = 1/tau  # B = 1/RC
+    B = 1/tau
     u = Vin
     st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
     st.latex(rf"\dot{{x}} = {A:.6f} x + {B:.6f} u \quad [V/s]")
-    st.latex(rf"u(t) = {Vin:.1f} \quad [V] \text{ (entrada constante)}")
+    st.latex(rf"u(t) = {Vin:.1f} \quad [V]")
     st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
     st.latex(f"A = {A:.6f}\ [1/s],\quad B = {B:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
     
@@ -366,7 +352,7 @@ def generar_reporte_completo(R, C, Vin):
     st.write(f"- **Tipo:** Pasa-bajas de primer orden")
     st.write(f"- **Estabilidad:** Asintoticamente estable (polo en $s = -{1/tau:.4f}$)")
     
-    # ========== 14. INTERPRETACION FISICA (CORREGIDA) ==========
+    # ========== 14. INTERPRETACION FISICA ==========
     st.markdown("### 13. Interpretacion Fisica")
     st.markdown(f"""
     - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
