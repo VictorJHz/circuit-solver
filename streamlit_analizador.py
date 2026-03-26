@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify
 import numpy as np
 import re
+import pandas as pd
 
 # ---------- CONFIGURACIÓN ----------
 st.set_page_config(page_title="Circuit Solver", layout="wide")
 st.title("⚡ Circuit Solver")
-st.caption("Analizador general de circuitos electricos - Metodo de Tablueau")
+st.caption("Analizador general de circuitos eléctricos - Método de Tableau")
 
 # ---------- SESSION STATE ----------
 if 'componentes' not in st.session_state:
@@ -80,14 +81,14 @@ def parsear_netlist(texto):
             
         parts = line.split()
         if len(parts) < 4:
-            errores.append(f"Linea {line_num}: Formato incorrecto")
+            errores.append(f"Línea {line_num}: Formato incorrecto")
             continue
         
         nombre = parts[0]
         letra = nombre[0].upper()
         
         if letra not in tipo_por_letra:
-            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
+            errores.append(f"Línea {line_num}: Tipo '{letra}' no reconocido")
             continue
         
         tipo = tipo_por_letra[letra]
@@ -101,12 +102,12 @@ def parsear_netlist(texto):
                 break
         
         if not valor_str:
-            errores.append(f"Linea {line_num}: No se encontro valor")
+            errores.append(f"Línea {line_num}: No se encontró valor")
             continue
         
         valor_total, prefijo = parse_valor(valor_str)
         if valor_total is None:
-            errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
+            errores.append(f"Línea {line_num}: Valor '{valor_str}' no válido")
             continue
         
         mult = prefijos_regex.get(prefijo, 1)
@@ -160,7 +161,7 @@ if submit:
             st.sidebar.success(f"Agregado {nombre}")
             st.rerun()
         except ValueError:
-            st.sidebar.error("Valor numerico invalido")
+            st.sidebar.error("Valor numérico inválido")
 
 # ---------- NETLIST ----------
 st.sidebar.divider()
@@ -183,7 +184,7 @@ with st.sidebar.expander("Cargar desde Netlist", expanded=False):
                             st.session_state.componentes.append(c)
                     st.rerun()
             else:
-                st.sidebar.warning("Netlist vacio")
+                st.sidebar.warning("Netlist vacío")
     
     with col2:
         if st.button("Ejemplo RC", key="ejemplo_rc", use_container_width=True):
@@ -212,7 +213,7 @@ if st.session_state.componentes:
 else:
     st.info("Sin componentes. Agrega individualmente o con netlist.")
 
-# ---------- FUNCIONES DE ANALISIS ----------
+# ---------- FUNCIONES DE ANÁLISIS ----------
 def obtener_nodos(cs):
     nodos = set()
     for c in cs:
@@ -221,12 +222,12 @@ def obtener_nodos(cs):
     return sorted(list(nodos))
 
 def clasificar_circuito(componentes):
-    """Clasifica el circuito segun sus componentes"""
+    """Clasifica el circuito según sus componentes"""
     tiene_capacitor = any(c['tipo'] == "Capacitor" for c in componentes)
     tiene_inductor = any(c['tipo'] == "Inductor" for c in componentes)
     
     if tiene_capacitor or tiene_inductor:
-        tipo = "Dinamico"
+        tipo = "Dinámico"
         orden = sum(1 for c in componentes if c['tipo'] in ["Capacitor", "Inductor"])
         
         if tiene_capacitor and not tiene_inductor:
@@ -236,14 +237,14 @@ def clasificar_circuito(componentes):
         elif tiene_capacitor and tiene_inductor:
             subtipo = "RLC"
         else:
-            subtipo = "Dinamico"
+            subtipo = "Dinámico"
         
         return tipo, subtipo, orden
     else:
-        return "Estatico", "Resistivo", 0
+        return "Estático", "Resistivo", 0
 
 def verificar_circuito_rc_valido(componentes):
-    """Verifica si el circuito es un RC serie valido (1R, 1C, 1V en serie)"""
+    """Verifica si el circuito es un RC serie válido (1R, 1C, 1V en serie)"""
     num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
     num_cap = sum(1 for c in componentes if c['tipo'] == "Capacitor")
     num_fuente_v = sum(1 for c in componentes if c['tipo'] == "Fuente de Voltaje")
@@ -274,7 +275,7 @@ def verificar_circuito_rc_valido(componentes):
     return True
 
 def verificar_circuito_rl_valido(componentes):
-    """Verifica si el circuito es un RL serie valido (1R, 1L, 1V en serie)"""
+    """Verifica si el circuito es un RL serie válido (1R, 1L, 1V en serie)"""
     num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
     num_ind = sum(1 for c in componentes if c['tipo'] == "Inductor")
     num_fuente_v = sum(1 for c in componentes if c['tipo'] == "Fuente de Voltaje")
@@ -305,7 +306,7 @@ def verificar_circuito_rl_valido(componentes):
     return True
 
 def verificar_circuito_rlc_valido(componentes):
-    """Verifica si el circuito es un RLC serie valido (1R, 1L, 1C, 1V en serie)"""
+    """Verifica si el circuito es un RLC serie válido (1R, 1L, 1C, 1V en serie)"""
     num_res = sum(1 for c in componentes if c['tipo'] == "Resistencia")
     num_ind = sum(1 for c in componentes if c['tipo'] == "Inductor")
     num_cap = sum(1 for c in componentes if c['tipo'] == "Capacitor")
@@ -339,9 +340,9 @@ def verificar_circuito_rlc_valido(componentes):
 
 def generar_reporte_rc(R, C, Vin, tau):
     """Genera reporte completo para circuito RC"""
-    st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
+    st.markdown("### 🔷 CONVENCIÓN ÚNICA Y CONSISTENTE")
     st.markdown(r"""
-    **Convencion de signos adoptada:**
+    **Convención de signos adoptada:**
     - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
     - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
     """)
@@ -360,17 +361,17 @@ def generar_reporte_rc(R, C, Vin, tau):
     st.latex(r"\text{Resistencia:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
     st.latex(r"\text{Capacitor:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
     
-    st.markdown("### 5. Ecuacion Diferencial")
+    st.markdown("### 5. Ecuación Diferencial")
     st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
     st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
     
     st.markdown("### 6. Variable de Estado")
     st.latex(r"x(t) = V_C(t)")
     
-    st.markdown("### 7. Ecuacion de Estado")
+    st.markdown("### 7. Ecuación de Estado")
     st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
     
-    st.markdown("### 8. Solucion Analitica")
+    st.markdown("### 8. Solución Analítica")
     st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
 
 def generar_reporte_rl(R, L, Vin, tau):
@@ -382,17 +383,17 @@ def generar_reporte_rl(R, L, Vin, tau):
     st.latex(r"\text{Resistencia:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
     st.latex(r"\text{Inductor:} \quad v_{L1} = L \cdot \frac{d i_{L1}}{dt} = " + f"{L:.0e}" + r"\ H \cdot \frac{d i_{L1}}{dt}")
     
-    st.markdown("### 2. Ecuacion Diferencial")
+    st.markdown("### 2. Ecuación Diferencial")
     st.latex(rf"{Vin:.1f} = {R:.0f} \cdot i_L + {L:.0e} \cdot \frac{{di_L}}{{dt}}")
     st.latex(rf"\frac{{di_L}}{{dt}} + \frac{{1}}{{{tau:.4f}}} i_L = \frac{{{Vin:.1f}}}{{{L:.0e}}}")
     
     st.markdown("### 3. Variable de Estado")
     st.latex(r"x(t) = i_L(t) \quad [A]")
     
-    st.markdown("### 4. Ecuacion de Estado")
+    st.markdown("### 4. Ecuación de Estado")
     st.latex(rf"\dot{{x}} = -\frac{{1}}{{{tau:.4f}}} x + \frac{{{Vin:.1f}}}{{{L:.0e}}}")
     
-    st.markdown("### 5. Solucion Analitica")
+    st.markdown("### 5. Solución Analítica")
     st.latex(f"i_L(t) = {Vin/R:.4f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [A]")
 
 def generar_reporte_rlc(R, L, C, Vin):
@@ -402,10 +403,10 @@ def generar_reporte_rlc(R, L, C, Vin):
     
     st.markdown("### 🔷 Circuito RLC Serie")
     
-    st.markdown("### 1. Ecuacion Diferencial")
+    st.markdown("### 1. Ecuación Diferencial")
     st.latex(rf"L C \frac{{d^2 v_C}}{{dt^2}} + R C \frac{{d v_C}}{{dt}} + v_C = V_{{in}}")
     
-    st.markdown("### 2. Parametros del Sistema")
+    st.markdown("### 2. Parámetros del Sistema")
     st.write(f"- **Frecuencia natural:** $\\omega_0 = {omega0:.4f}$ rad/s")
     st.write(f"- **Factor de amortiguamiento:** $\\alpha = {alpha:.4f}$")
     st.write(f"- **Coeficiente de amortiguamiento:** $\\zeta = {alpha/omega0:.4f}$")
@@ -421,8 +422,8 @@ def generar_reporte_rlc(R, L, C, Vin):
     st.latex(r"x_1(t) = v_C(t), \quad x_2(t) = i_L(t)")
 
 def generar_reporte_estatico(componentes):
-    """Genera reporte para circuitos estaticos con convencion libro, corrientes y potencias"""
-    st.subheader("📐 Analisis de Circuito Estatico")
+    """Genera reporte para circuitos estáticos con convención libro, corrientes y potencias"""
+    st.subheader("📐 Análisis de Circuito Estático")
     
     st.write("**Componentes detectados:**")
     for c in componentes:
@@ -433,7 +434,7 @@ def generar_reporte_estatico(componentes):
     n = len(nodos_no_tierra)
     
     if n == 0:
-        st.warning("No hay nodos para analisis (solo tierra)")
+        st.warning("No hay nodos para análisis (solo tierra)")
         return
     
     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
@@ -480,28 +481,32 @@ def generar_reporte_estatico(componentes):
             V_sol = G.inv() * I
             V_numerico = np.array(V_sol).astype(float).flatten()
             
-            # Crear diccionario de voltajes (convencion solver)
+            # Crear diccionario de voltajes (convención solver)
             voltajes_solver = {}
             for i, nodo in enumerate(nodos_no_tierra):
                 voltajes_solver[nodo] = V_numerico[i]
             
-            # ========== PARTE 1: CONVENCION LIBRO ==========
-            st.markdown("### 📖 Resultados en Convencion de Libro")
+            # ========== PARTE 1: CONVENCIÓN LIBRO - TABLA ==========
+            st.markdown("### 📖 Resultados en Convención de Libro")
             
-            # Voltajes de nodo en convencion libro: V_libro = -V_solver
+            # Voltajes de nodo en convención libro: V_libro = -V_solver
             voltajes_libro = {}
             for nodo, v in voltajes_solver.items():
                 voltajes_libro[nodo] = -v
             
-            st.write("**Voltajes de nodo (Convencion Libro):**")
-            for nodo, v in voltajes_libro.items():
-                st.latex(f"V_{{{nodo}}} = {v:.4f} \\quad [V]")
-            st.caption("Nota: Convencion libro considera V = -V_solver (nodo positivo con respecto a tierra)")
+            # Crear DataFrame para voltajes
+            voltajes_df = pd.DataFrame([
+                {"Nodo": nodo, "Voltaje [V]": f"{v:.4f}"}
+                for nodo, v in voltajes_libro.items()
+            ])
+            st.dataframe(voltajes_df, use_container_width=True, hide_index=True)
+            st.caption("Nota: Convención libro considera V = -V_solver (nodo positivo con respecto a tierra)")
             
-            # ========== PARTE 2: CORRIENTES EN RAMAS (CONVENCION LIBRO) ==========
-            st.markdown("### 🔄 Corrientes en Ramas (Convencion Libro)")
-            st.caption("En convencion libro, la corriente fluye del terminal positivo al negativo")
+            # ========== PARTE 2: CORRIENTES EN RAMAS - TABLA ==========
+            st.markdown("### 🔄 Corrientes en Ramas (Convención Libro)")
+            st.caption("En convención libro, la corriente fluye del terminal positivo al negativo")
             
+            corrientes_data = []
             for c in componentes:
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
@@ -512,17 +517,27 @@ def generar_reporte_estatico(componentes):
                     i_libro = (v_o_libro - v_d_libro) / R
                     
                     if i_libro > 0:
-                        direccion = f"de {nodo_o} a {nodo_d}"
+                        direccion = f"{nodo_o} → {nodo_d}"
                     elif i_libro < 0:
-                        direccion = f"de {nodo_d} a {nodo_o}"
+                        direccion = f"{nodo_d} → {nodo_o}"
                     else:
-                        direccion = "cero"
+                        direccion = "Cero"
                     
-                    st.write(f"**{c['nombre']}:** i = {i_libro:.4f} A → flujo real {direccion}")
+                    corrientes_data.append({
+                        "Elemento": c['nombre'],
+                        "Tipo": c['tipo'],
+                        "Corriente [A]": f"{abs(i_libro):.4f}",
+                        "Dirección": direccion
+                    })
             
-            # ========== PARTE 3: VALIDACION KCL ==========
-            st.markdown("### ✅ Validacion KCL")
+            if corrientes_data:
+                corrientes_df = pd.DataFrame(corrientes_data)
+                st.dataframe(corrientes_df, use_container_width=True, hide_index=True)
             
+            # ========== PARTE 3: VALIDACIÓN KCL ==========
+            st.markdown("### ✅ Validación KCL")
+            
+            kcl_data = []
             tolerancia = 1e-6
             for nodo in nodos_no_tierra:
                 suma = 0
@@ -551,15 +566,25 @@ def generar_reporte_estatico(componentes):
                             suma -= I_val
                 
                 if abs(suma) < tolerancia:
-                    st.success(f"✔ Nodo {nodo}: KCL satisfecha (suma = {suma:.2e} A)")
+                    status = "✅ Satisfecha"
                 else:
-                    st.error(f"❌ Nodo {nodo}: KCL no satisfecha (suma = {suma:.2e} A)")
+                    status = "❌ No satisfecha"
+                
+                kcl_data.append({
+                    "Nodo": nodo,
+                    "Suma Corrientes [A]": f"{suma:.2e}",
+                    "Estado": status
+                })
             
-            # ========== PARTE 4: POTENCIAS (CONVENCION LIBRO) ==========
-            st.markdown("### ⚡ Potencias en Elementos (Convencion Libro)")
-            st.caption("Para resistencias: P = V·I > 0 (disipacion). Para fuentes: P > 0 entrega, P < 0 absorbe")
+            if kcl_data:
+                kcl_df = pd.DataFrame(kcl_data)
+                st.dataframe(kcl_df, use_container_width=True, hide_index=True)
             
-            potencias = []
+            # ========== PARTE 4: POTENCIAS - TABLA ==========
+            st.markdown("### ⚡ Potencias en Elementos (Convención Libro)")
+            st.caption("Para resistencias: P = V·I > 0 (disipación). Para fuentes: P > 0 entrega, P < 0 absorbe")
+            
+            potencias_data = []
             for c in componentes:
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
@@ -570,19 +595,19 @@ def generar_reporte_estatico(componentes):
                     i = v / c['valor_total']
                     P = v * i
                     
-                    # En resistencia, P siempre debe ser positiva (disipacion)
                     if P < 0:
-                        P = -P  # Corregir signo por convencion
+                        P = -P
+                        v = abs(v)
+                        i = abs(i)
                     
-                    potencias.append({
-                        "elemento": c['nombre'],
-                        "tipo_comp": c['tipo'],
-                        "voltaje": abs(v),
-                        "corriente": abs(i),
-                        "potencia": P,
-                        "comportamiento": "Disipa"
+                    potencias_data.append({
+                        "Elemento": c['nombre'],
+                        "Tipo": c['tipo'],
+                        "Voltaje [V]": f"{v:.4f}",
+                        "Corriente [A]": f"{i:.4f}",
+                        "Potencia [W]": f"{P:.4f}",
+                        "Comportamiento": "🔋 Disipa"
                     })
-                    st.write(f"**{c['nombre']}:** V = {abs(v):.4f} V, I = {abs(i):.4f} A, P = {P:.4f} W → Disipa")
                 
                 elif c['tipo'] == "Fuente de Corriente":
                     nodo_o = c['nodo_origen']
@@ -593,39 +618,50 @@ def generar_reporte_estatico(componentes):
                     I_val = c['valor_total']
                     P = v * I_val
                     
-                    # Para fuente de corriente: P > 0 entrega potencia al circuito
                     if P > 0:
-                        comportamiento = "Entrega"
+                        comportamiento = "⚡ Entrega"
                     else:
-                        comportamiento = "Absorbe"
+                        comportamiento = "🔋 Absorbe"
                     
-                    potencias.append({
-                        "elemento": c['nombre'],
-                        "tipo_comp": c['tipo'],
-                        "voltaje": v,
-                        "corriente": I_val,
-                        "potencia": P,
-                        "comportamiento": comportamiento
+                    potencias_data.append({
+                        "Elemento": c['nombre'],
+                        "Tipo": c['tipo'],
+                        "Voltaje [V]": f"{v:.4f}",
+                        "Corriente [A]": f"{I_val:.4f}",
+                        "Potencia [W]": f"{P:.4f}",
+                        "Comportamiento": comportamiento
                     })
-                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {I_val:.4f} A, P = {P:.4f} W → {comportamiento}")
-                
-                elif c['tipo'] == "Fuente de Voltaje":
-                    st.write(f"**{c['nombre']}:** Corriente no determinada en analisis nodal")
             
-            # Tabla de potencias
-            if potencias:
-                st.write("**Tabla de Potencias:**")
-                st.markdown("| Elemento | Tipo | V [V] | I [A] | P [W] | Comportamiento |")
-                st.markdown("|----------|------|-------|-------|-------|----------------|")
-                for p in potencias:
-                    st.markdown(f"| {p['elemento']} | {p['tipo_comp']} | {p['voltaje']:.4f} | {p['corriente']:.4f} | {p['potencia']:.4f} | {p['comportamiento']} |")
+            if potencias_data:
+                potencias_df = pd.DataFrame(potencias_data)
+                st.dataframe(potencias_df, use_container_width=True, hide_index=True)
+            
+            # ========== PARTE 5: BALANCE DE POTENCIA ==========
+            st.markdown("### ⚖️ Balance de Potencia")
+            
+            potencia_total_disipada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Disipa" in p["Comportamiento"])
+            potencia_total_entregada = sum(float(p["Potencia [W]"]) for p in potencias_data if "Entrega" in p["Comportamiento"])
+            potencia_total_absorbida = sum(float(p["Potencia [W]"]) for p in potencias_data if "Absorbe" in p["Comportamiento"])
+            
+            col_bal1, col_bal2, col_bal3 = st.columns(3)
+            with col_bal1:
+                st.metric("Potencia Disipada", f"{potencia_total_disipada:.4f} W")
+            with col_bal2:
+                st.metric("Potencia Entregada", f"{potencia_total_entregada:.4f} W")
+            with col_bal3:
+                st.metric("Potencia Absorbida", f"{potencia_total_absorbida:.4f} W")
+            
+            if abs(potencia_total_entregada - (potencia_total_disipada + abs(potencia_total_absorbida))) < 1e-6:
+                st.success("✅ Balance de potencia verificado: Potencia Entregada = Potencia Disipada + Potencia Absorbida")
+            else:
+                st.warning("⚠️ Balance de potencia no verificado")
             
     except Exception as e:
         st.warning(f"No se pudo resolver el sistema: {e}")
 
 def generar_reporte_dinamico(componentes, subtipo, orden):
-    """Genera reporte para circuitos dinamicos"""
-    st.subheader(f"📐 Analisis de Circuito Dinamico - Tipo: {subtipo}")
+    """Genera reporte para circuitos dinámicos"""
+    st.subheader(f"📐 Análisis de Circuito Dinámico - Tipo: {subtipo}")
     st.write(f"**Orden del sistema:** {orden}")
     
     # Detectar valores
@@ -653,7 +689,7 @@ def generar_reporte_dinamico(componentes, subtipo, orden):
         generar_reporte_rlc(R_val, L_val, C_val, Vin_val)
     
     else:
-        st.info("Circuito dinamico general - analisis basico")
+        st.info("Circuito dinámico general - análisis básico")
         st.write("**Ecuaciones del circuito:**")
         
         t = symbols('t')
@@ -766,7 +802,7 @@ with b1:
                     "Componente": r["componente"],
                     "Valor": r["valor"]
                 })
-            st.dataframe(ramas_df, use_container_width=True)
+            st.dataframe(ramas_df, use_container_width=True, hide_index=True)
             
             st.subheader("📊 Grafo Formal del Circuito")
             st.caption("Representación: Nodos = puntos | Ramas = flechas | + = origen | - = destino")
@@ -839,13 +875,13 @@ with b2:
             
             st.info(f"**Tipo de sistema:** {tipo_sistema} | **Subtipo:** {subtipo} | **Orden:** {orden}")
             
-            if tipo_sistema == "Estatico":
+            if tipo_sistema == "Estático":
                 generar_reporte_estatico(st.session_state.componentes)
             else:
                 generar_reporte_dinamico(st.session_state.componentes, subtipo, orden)
 
 with b3:
-    if st.button("Codigo MATLAB", key="matlab"):
+    if st.button("Código MATLAB", key="matlab"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
@@ -863,7 +899,7 @@ with b3:
                 
                 if R and C and Vin:
                     tau = R * C
-                    code = f"""% Circuito RC - Analisis Completo
+                    code = f"""% Circuito RC - Análisis Completo
 clear; clc; close all;
 
 R = {R:.6f}; C = {C:.6f}; Vin = {Vin:.6f}; tau = R*C;
@@ -873,7 +909,7 @@ eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
 cond = Vc(0) == 0;
 Vc_sol = dsolve(eq, cond);
 
-disp('=== SOLUCION DEL CIRCUITO RC ===');
+disp('=== SOLUCIÓN DEL CIRCUITO RC ===');
 fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
 pretty(Vc_sol);
 
@@ -887,9 +923,9 @@ plot([0 5*tau], [Vin Vin], '--r');
 legend('Vc(t)', 'Vin');
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab_rc")
+                    st.download_button("Descargar código MATLAB", code, "circuito_rc.m", key="descargar_matlab_rc")
                 else:
-                    st.info("No se detecto un circuito RC valido")
+                    st.info("No se detectó un circuito RC válido")
             
             elif subtipo == "RL" and verificar_circuito_rl_valido(st.session_state.componentes):
                 R, L, Vin = None, None, None
@@ -903,7 +939,7 @@ legend('Vc(t)', 'Vin');
                 
                 if R and L and Vin:
                     tau = L / R
-                    code = f"""% Circuito RL - Analisis Completo
+                    code = f"""% Circuito RL - Análisis Completo
 clear; clc; close all;
 
 R = {R:.6f}; L = {L:.6f}; Vin = {Vin:.6f}; tau = L/R;
@@ -913,7 +949,7 @@ eq = diff(iL, t) == -1/tau * iL + Vin/L;
 cond = iL(0) == 0;
 iL_sol = dsolve(eq, cond);
 
-disp('=== SOLUCION DEL CIRCUITO RL ===');
+disp('=== SOLUCIÓN DEL CIRCUITO RL ===');
 fprintf('iL(t) = %.4f * (1 - exp(-t/%.4f)) [A]\\n', Vin/R, tau);
 pretty(iL_sol);
 
@@ -927,22 +963,22 @@ plot([0 5*tau], [Vin/R Vin/R], '--r');
 legend('iL(t)', 'Valor final');
 """
                     st.code(code, language="matlab")
-                    st.download_button("Descargar codigo MATLAB", code, "circuito_rl.m", key="descargar_matlab_rl")
+                    st.download_button("Descargar código MATLAB", code, "circuito_rl.m", key="descargar_matlab_rl")
                 else:
-                    st.info("No se detecto un circuito RL valido")
+                    st.info("No se detectó un circuito RL válido")
             
-            elif tipo_sistema == "Estatico":
-                # Generar codigo MATLAB para circuito resistivo
+            elif tipo_sistema == "Estático":
+                # Generar código MATLAB para circuito resistivo
                 nodos = obtener_nodos(st.session_state.componentes)
                 nodos_no_tierra = [n for n in nodos if n != "N0"]
                 n = len(nodos_no_tierra)
                 
                 if n > 0:
-                    # Construir matrices G e I simbolicamente
+                    # Construir matrices G e I simbólicamente
                     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
                     
-                    # Generar codigo MATLAB
-                    matlab_code = f"""% Circuito Resistivo - Analisis Nodal
+                    # Generar código MATLAB
+                    matlab_code = f"""% Circuito Resistivo - Análisis Nodal
 clear; clc;
 
 % Matriz de conductancias G ({n}x{n})
@@ -992,8 +1028,8 @@ I = zeros({n},1);
                     if tiene_fuente_v:
                         matlab_code += """
 % NOTA: El circuito contiene fuentes de voltaje.
-% Este analisis nodal basico no las maneja directamente.
-% Se requiere el metodo de supernodo.
+% Este análisis nodal básico no las maneja directamente.
+% Se requiere el método de supernodo.
 """
                     
                     matlab_code += """
@@ -1001,7 +1037,7 @@ I = zeros({n},1);
 V = G \\ I;
 
 % Mostrar resultados
-disp('=== SOLUCION DEL CIRCUITO RESISTIVO ===');
+disp('=== SOLUCIÓN DEL CIRCUITO RESISTIVO ===');
 disp('Voltajes nodales:');
 """
                     for i, nodo in enumerate(nodos_no_tierra):
@@ -1035,11 +1071,11 @@ disp('\\nCorrientes en resistencias:');
                             matlab_code += f"fprintf('{c['nombre']}: i = %.4f A\\n', i_{c['nombre']});\n"
                     
                     st.code(matlab_code, language="matlab")
-                    st.download_button("Descargar codigo MATLAB", matlab_code, "circuito_resistivo.m", key="descargar_matlab_resistivo")
+                    st.download_button("Descargar código MATLAB", matlab_code, "circuito_resistivo.m", key="descargar_matlab_resistivo")
                 else:
-                    st.info("Circuito resistivo sin nodos validos para analisis nodal")
+                    st.info("Circuito resistivo sin nodos válidos para análisis nodal")
             else:
-                st.info("Circuito no compatible con generacion automatica de codigo MATLAB")
+                st.info("Circuito no compatible con generación automática de código MATLAB")
 
 with b4:
     if st.button("Limpiar Todo", key="limpiar_todo"):
