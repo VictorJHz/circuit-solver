@@ -118,68 +118,16 @@ def generar_matriz_incidencia(componentes, nodos):
     nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
     A = zeros(n_nodos, n_ramas)
     
-    # Definir orden de ramas (importante!)
     orden_ramas = []
     for j, c in enumerate(componentes):
         orden_ramas.append(c['nombre'])
         
-        # Orientación: la corriente se define del nodo origen al nodo destino
         if c['nodo_origen'] != "N0":
-            A[nodo_idx[c['nodo_origen']], j] = 1   # corriente sale
+            A[nodo_idx[c['nodo_origen']], j] = 1
         if c['nodo_destino'] != "N0":
-            A[nodo_idx[c['nodo_destino']], j] = -1  # corriente entra
+            A[nodo_idx[c['nodo_destino']], j] = -1
     
     return A, nodos_no_tierra, orden_ramas
-
-def generar_matriz_tableau_correcta(componentes, nodos):
-    """
-    Genera la matriz M del método de Tablueau correctamente
-    Sistema: M * [e; i] = [0; Vs]
-    """
-    nodos_no_tierra = [n for n in nodos if n != "N0"]
-    n_nodos = len(nodos_no_tierra)
-    n_ramas = len(componentes)
-    
-    nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
-    
-    # Tamaño de la matriz: (n_nodos + n_ramas) x (n_nodos + n_ramas)
-    M = zeros(n_nodos + n_ramas, n_nodos + n_ramas)
-    b = zeros(n_nodos + n_ramas, 1)
-    
-    s = symbols('s')  # variable de Laplace
-    
-    # ========== KCL: A·i = 0 (primeras n_nodos filas) ==========
-    for j, c in enumerate(componentes):
-        if c['nodo_origen'] != "N0":
-            M[nodo_idx[c['nodo_origen']], n_nodos + j] = 1
-        if c['nodo_destino'] != "N0":
-            M[nodo_idx[c['nodo_destino']], n_nodos + j] = -1
-    
-    # ========== KVL: v = A^T·e (siguientes n_ramas filas) ==========
-    for j, c in enumerate(componentes):
-        # Para cada rama: v_j = e_origen - e_destino
-        if c['nodo_origen'] != "N0":
-            M[n_nodos + j, nodo_idx[c['nodo_origen']]] = 1
-        if c['nodo_destino'] != "N0":
-            M[n_nodos + j, nodo_idx[c['nodo_destino']]] = -1
-        
-        # ========== BR: v = Z·i + Vs (misma fila) ==========
-        if c['tipo'] == "Resistencia":
-            M[n_nodos + j, n_nodos + j] = -c['valor_total']  # -R
-        elif c['tipo'] == "Capacitor":
-            # CORRECCIÓN: Z_C = 1/(C·s)
-            M[n_nodos + j, n_nodos + j] = -1/(c['valor_total'] * s)
-        elif c['tipo'] == "Inductor":
-            M[n_nodos + j, n_nodos + j] = -c['valor_total'] * s
-        elif c['tipo'] == "Fuente de Voltaje":
-            # Para fuente de voltaje: v = Vs (sin término Z·i)
-            b[n_nodos + j, 0] = c['valor_total']
-        elif c['tipo'] == "Fuente de Corriente":
-            # Para fuente de corriente: i = Is
-            M[n_nodos + j, n_nodos + j] = -1  # -1·i = -Is
-            b[n_nodos + j, 0] = -c['valor_total']
-    
-    return M, b, nodos_no_tierra
 
 def dibujar_grafo_con_polaridad(componentes):
     G = nx.MultiDiGraph()
@@ -253,7 +201,7 @@ with col1:
             plt.figtext(0.02, 0.02, "Activos: flecha del positivo (+) al negativo (-) | Pasivos: direccion convencional de corriente", fontsize=10, style='italic')
             st.pyplot(fig)
 
-# ----- Generar Sistema de Ecuaciones (CON MATRIZ TABLEAU CORRECTA) -----
+# ----- Generar Sistema de Ecuaciones -----
 with col2:
     if st.button("Generar Ecuaciones"):
         if not st.session_state.componentes:
@@ -266,94 +214,73 @@ with col2:
                 st.subheader("Analisis Completo del Circuito RC")
                 tau = R * C
                 
-                # ========== 1. KCL ==========
+                # 1. KCL
                 st.write("**1. Ley de Corrientes de Kirchhoff (KCL)**")
                 st.latex(r"i_R = i_C")
                 st.caption("La corriente que pasa por la resistencia es igual a la corriente que pasa por el capacitor")
                 
-                # ========== 2. LVK ==========
+                # 2. LVK
                 st.write("**2. Ley de Voltajes de Kirchhoff (LVK)**")
                 st.latex(r"V_{in} - V_R - V_C = 0")
                 st.caption("Suma de voltajes en la malla cerrada es igual a cero")
                 
-                # ========== 3. BR ==========
+                # 3. BR
                 st.write("**3. Relaciones de los Componentes (BR)**")
                 st.latex(r"V_R = R \cdot i_R")
                 st.latex(r"i_C = C \cdot \frac{dV_C}{dt}")
-                st.latex(r"V_{in} = 9")
+                st.latex(r"V_{in} = " + f"{Vin:.1f}")
                 
-                # ========== 4. MATRIZ DE INCIDENCIA A ==========
+                # 4. Matriz de incidencia A
                 st.write("**4. Matriz de Incidencia A**")
                 st.write("**Orden de ramas:** [V1, R1, C1]")
-                st.write("**Orientación:** La corriente se define del nodo origen al nodo destino")
-                A = Matrix([
-                    [1, -1, 0],   # Nodo N1: V1 sale, R1 entra
-                    [0, 1, -1]    # Nodo N2: R1 sale, C1 entra
-                ])
+                st.write("**Orientacion:** La corriente se define del nodo origen al nodo destino")
                 st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
                 st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
                 st.caption("+1: corriente sale del nodo | -1: corriente entra al nodo")
                 
-                # ========== 5. VECTOR e (Potenciales nodales) ==========
+                # 5. Vector e (potenciales nodales)
                 st.write("**5. Vector e (Potenciales nodales)**")
                 st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
                 st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
                 
-                # ========== 6. VECTOR v (Voltajes de rama) ==========
-                st.write("**6. Vector v (Voltajes de rama)**")
+                # 6. Vector v (voltajes de rama) - KVL matricial
+                st.write("**6. Vector v (Voltajes de rama) - KVL matricial**")
                 st.latex(r"v = A^T \cdot e = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} = \begin{bmatrix} V_{N1} \\ V_{N2} - V_{N1} \\ -V_{N2} \end{bmatrix}")
-                st.caption("Relación KVL: v = Aᵀ·e")
+                st.caption("Relacion KVL: v = Aᵀ·e")
                 
-                # ========== 7. MATRIZ Z CORREGIDA ==========
+                # 7. Matriz Z (impedancias) - CORREGIDA
                 st.write("**7. Matriz Z (Impedancias)**")
                 st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{Cs} \end{bmatrix}")
-                st.caption("CORRECCIÓN: Capacitor como 1/(Cs), no como Cs")
+                st.caption("CORRECCION: Capacitor como 1/(Cs), no como Cs")
                 
-                # ========== 8. VECTOR Vs ==========
+                # 8. Vector Vs (fuentes de voltaje)
                 st.write("**8. Vector Vs (Fuentes de voltaje)**")
                 st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix}")
                 
-                # ========== 9. MATRIZ M (TABLEAU CORRECTA) ==========
-                st.write("**9. Matriz M del Método de Tablueau**")
-                st.write("Sistema: M · [e; i] = [0; Vs]")
-                
-                M = Matrix([
-                    # KCL: A·i = 0
-                    [0, 0, 1, -1, 0],      # Nodo N1: i_V1 - i_R1 = 0
-                    [0, 0, 0, 1, -1],      # Nodo N2: i_R1 - i_C1 = 0
-                    # KVL + BR: v = Aᵀ·e = Z·i + Vs
-                    [1, 0, 0, 0, 0],       # V1: V_N1 = Vin  (fuente)
-                    [-1, 1, 0, -R, 0],     # R1: V_N2 - V_N1 = -R·i_R1
-                    [0, -1, 0, 0, 1/(C*s)] # C1: -V_N2 = (1/(Cs))·i_C1
-                ])
-                
-                st.latex(latex(M))
-                st.caption("Filas: [KCL_N1, KCL_N2, KVL_V1, KVL_R1, KVL_C1] | Columnas: [V_N1, V_N2, i_V1, i_R1, i_C1]")
-                
-                # ========== 10. ECUACION DIFERENCIAL ==========
-                st.write("**10. Ecuacion Diferencial del Circuito**")
+                # 9. Ecuacion diferencial
+                st.write("**9. Ecuacion Diferencial del Circuito**")
                 st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}}")
                 st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}}")
                 
-                # ========== 11. VARIABLE DE ESTADO ==========
-                st.write("**11. Variable de Estado**")
+                # 10. Variable de estado
+                st.write("**10. Variable de Estado**")
                 st.latex(r"x(t) = V_C(t)")
                 
-                # ========== 12. ECUACION DE ESTADO (CORREGIDA) ==========
-                st.write("**12. Ecuacion de Estado**")
+                # 11. Ecuacion de estado
+                st.write("**11. Ecuacion de Estado**")
                 st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{V_{{in}}}}{{RC}}")
                 st.latex(rf"\dot{{x}} = -{1/tau:.4f} x + {Vin/tau:.4f}")
-                st.caption("Forma estándar: ẋ = A·x + B·u")
+                st.caption("Forma estandar: ẋ = A·x + B·u")
                 
-                # ========== 13. CLASIFICACION ==========
-                st.write("**13. Clasificacion del Sistema**")
+                # 12. Clasificacion
+                st.write("**12. Clasificacion del Sistema**")
                 st.write(f"- **Orden:** Sistema de primer orden")
                 st.write(f"- **Linealidad:** Lineal")
                 st.write(f"- **Invarianza:** Invariante en el tiempo")
                 st.write(f"- **Tipo:** Pasa-bajas de primer orden")
                 
-                # ========== 14. INTERPRETACION FISICA ==========
-                st.write("**14. Interpretacion Fisica**")
+                # 13. Interpretacion fisica
+                st.write("**13. Interpretacion Fisica**")
                 st.markdown(f"""
                 - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
                 - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
@@ -361,31 +288,24 @@ with col2:
                 - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
                 """)
                 
-                # ========== 15. SOLUCION ANALITICA ==========
-                st.write("**15. Solucion Analitica**")
+                # 14. Solucion analitica
+                st.write("**14. Solucion Analitica**")
                 st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}})")
                 
             else:
-                # Circuito general - mostrar matriz de incidencia y tableau
+                # Circuito general
                 st.subheader("Sistema Matricial Completo (Metodo de Tablueau)")
-                
                 nodos = obtener_nodos_unicos(st.session_state.componentes)
                 
-                # Matriz de incidencia
-                A, nodos_nt, orden_ramas = generar_matriz_incidencia(st.session_state.componentes, nodos)
-                st.write("**Matriz de Incidencia A**")
-                st.write(f"**Orden de ramas:** {orden_ramas}")
-                st.write(f"**Nodos (excepto N0):** {nodos_nt}")
-                st.latex(latex(A))
-                st.caption("+1: corriente sale del nodo | -1: corriente entra al nodo")
-                
-                # Matriz Tableau
-                M, b, nodos_nt = generar_matriz_tableau_correcta(st.session_state.componentes, nodos)
-                st.write("**Matriz M del Sistema Tableau**")
-                st.latex(latex(M))
-                st.write("**Vector b**")
-                st.latex(latex(b))
-                st.caption("Sistema: M · [e; i] = b")
+                if len(nodos) > 1:
+                    A, nodos_nt, orden_ramas = generar_matriz_incidencia(st.session_state.componentes, nodos)
+                    st.write("**Matriz de Incidencia A**")
+                    st.write(f"**Nodos (excepto N0):** {nodos_nt}")
+                    st.write(f"**Orden de ramas:** {orden_ramas}")
+                    st.latex(latex(A))
+                    st.caption("+1: corriente sale del nodo | -1: corriente entra al nodo")
+                else:
+                    st.info("Circuito sin nodos (solo tierra)")
 
 # ----- Generar Código MATLAB -----
 with col3:
@@ -444,7 +364,7 @@ plot([0 5*tau], [Vin Vin], '--r');
 legend('Vc(t)', 'Vin', 'Location', 'best');
 """
             else:
-                matlab_code = "%% Circuito General\nclear; clc;\n% Usar el sistema Tableau generado en la app\n"
+                matlab_code = "%% Circuito General\nclear; clc;\n% Usar las ecuaciones generadas en la app\n"
             
             st.subheader("Codigo MATLAB Generado")
             st.code(matlab_code, language="matlab")
@@ -500,25 +420,30 @@ with col6:
                 st.write(f"**Matriz de Incidencia A**")
                 st.write(f"**Nodos (excepto N0):** {nodos_nt}")
                 st.write(f"**Orden de ramas:** {orden_ramas}")
-                st.write(f"**Orientación:** Corriente definida del nodo origen al nodo destino")
+                st.write(f"**Orientacion:** Corriente definida del nodo origen al nodo destino")
                 st.latex(latex(A))
                 st.caption("+1: corriente sale del nodo | -1: corriente entra al nodo")
 
-# ----- Sistema Tableau -----
+# ----- Informacion Tablueau -----
 with col7:
-    with st.expander("Sistema Tableau (M·x = b)", expanded=False):
-        if st.button("Generar Tableau", key="tableau"):
-            if not st.session_state.componentes:
-                st.warning("Agrega componentes")
-            else:
-                nodos = obtener_nodos_unicos(st.session_state.componentes)
-                M, b, nodos_nt = generar_matriz_tableau_correcta(st.session_state.componentes, nodos)
-                st.write("**Matriz M del Sistema Tableau**")
-                st.latex(latex(M))
-                st.write("**Vector b**")
-                st.latex(latex(b))
-                st.caption("Sistema: M · [e; i] = b")
-                st.write("**Variables:** [e (potenciales nodales); i (corrientes de rama)]")
+    with st.expander("Metodo de Tablueau", expanded=False):
+        st.write("### Estructura del Metodo de Tablueau")
+        st.write("")
+        st.write("**Sistema:** M · x = b")
+        st.write("")
+        st.write("**Ecuaciones:**")
+        st.latex(r"\begin{bmatrix} A & 0 \\ A^T & -Z \end{bmatrix} \begin{bmatrix} e \\ i \end{bmatrix} = \begin{bmatrix} 0 \\ V_s \end{bmatrix}")
+        st.write("")
+        st.write("**Donde:**")
+        st.write("- **A**: Matriz de incidencia (nodos x ramas)")
+        st.write("- **Z**: Matriz de impedancias (diagonal)")
+        st.write("- **e**: Potenciales nodales")
+        st.write("- **i**: Corrientes de rama")
+        st.write("- **V_s**: Fuentes de voltaje")
+        st.write("")
+        st.write("**Para el circuito RC:**")
+        st.latex(r"M = \begin{bmatrix} 0 & 0 & 1 & -1 & 0 \\ 0 & 0 & 0 & 1 & -1 \\ 1 & 0 & 0 & 0 & 0 \\ -1 & 1 & 0 & -R & 0 \\ 0 & -1 & 0 & 0 & \frac{1}{Cs} \end{bmatrix}")
+        st.latex(r"x = \begin{bmatrix} V_{N1} \\ V_{N2} \\ i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}, \quad b = \begin{bmatrix} 0 \\ 0 \\ V_{in} \\ 0 \\ 0 \end{bmatrix}")
 
 # ---------- INFORMACION ADICIONAL ----------
 with st.sidebar.expander("Instrucciones"):
@@ -527,7 +452,7 @@ with st.sidebar.expander("Instrucciones"):
     1. **Nodo N0**: Usa N0 como tierra
     2. **Agrega componentes**: Completa todos los campos
     3. **Mostrar Grafo**: Visualiza polaridad y direcciones
-    4. **Generar Ecuaciones**: Obtiene analisis completo con forma matricial
+    4. **Generar Ecuaciones**: Obtiene analisis completo
     5. **MATLAB**: Descarga codigo optimizado
     
     ### Ejemplo Circuito RC:
@@ -538,14 +463,8 @@ with st.sidebar.expander("Instrucciones"):
     | C1 | Capacitor | N2 | N0 | 100u |
     
     ### Metodo de Tablueau:
-    - **Matriz M**: Contiene KCL, KVL y BR
-    - **Vector x**: [potenciales nodales; corrientes de rama]
-    - **Vector b**: Fuentes independientes
-    - **Sistema**: M·x = b
-    
-    ### Ecuacion de Estado:
-    - **Variable:** x = Vc
-    - **Forma:** ẋ = A·x + B·u
-    - **A = -1/RC**
-    - **B = Vin/RC**
+    - **KCL:** A·i = 0
+    - **KVL:** v = Aᵀ·e
+    - **BR:** v = Z·i + Vs
+    - **Sistema:** M·x = b
     """)
