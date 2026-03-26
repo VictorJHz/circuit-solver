@@ -7,7 +7,7 @@ import numpy as np
 # ---------- CONFIGURACIÓN DE INTERFAZ ----------
 st.set_page_config(page_title="Circuit Solver", layout="wide")
 st.title("⚡ Circuit Solver")
-st.caption("Análisis de circuitos eléctricos con generación correcta de ecuaciones")
+st.caption("Analisis de circuitos electricos con generacion correcta de ecuaciones")
 
 # ---------- SESSION STATE ----------
 if 'componentes' not in st.session_state:
@@ -33,7 +33,7 @@ with st.sidebar.form(key='form_componente', clear_on_submit=True):
     tipo_componente = st.selectbox("Tipo de componente", list(componentes_disponibles.keys()))
     col_val, col_pref = st.columns([3, 1])
     with col_val:
-        valor_text = st.text_input("Valor (solo número)")
+        valor_text = st.text_input("Valor (solo numero)")
     with col_pref:
         prefijo_valor = st.selectbox("Prefijo", list(prefijos.keys()), index=0)
     submit = st.form_submit_button("Agregar Componente")
@@ -59,23 +59,23 @@ if submit:
                 "needs_current": componentes_disponibles[tipo_componente]["needs_current"]
             }
             st.session_state.componentes.append(componente)
-            st.success(f"✅ Componente {input_nombre} agregado correctamente")
+            st.success(f"Componente {input_nombre} agregado correctamente")
         except ValueError:
-            st.error("El valor debe ser un número")
+            st.error("El valor debe ser un numero")
 
 # ---------- MOSTRAR COMPONENTES ----------
-st.subheader("📋 Componentes agregados")
+st.subheader("Componentes agregados")
 if st.session_state.componentes:
     for i, c in enumerate(st.session_state.componentes):
         col1, col2 = st.columns([4, 1])
         with col1:
-            st.write(f"**{c['nombre']}**: {c['tipo']} ({c['tipo_elec']}) | Valor: {c['valor']}{c['prefijo']}{c['unidad']} | Nodos: {c['nodo_origen']} → {c['nodo_destino']}")
+            st.write(f"**{c['nombre']}**: {c['tipo']} ({c['tipo_elec']}) | Valor: {c['valor']}{c['prefijo']}{c['unidad']} | Nodos: {c['nodo_origen']} -> {c['nodo_destino']}")
         with col2:
-            if st.button(f"🗑️", key=f"del_{i}"):
+            if st.button(f"Eliminar", key=f"del_{i}"):
                 st.session_state.componentes.pop(i)
                 st.rerun()
 else:
-    st.info("No hay componentes agregados todavía. Agrega componentes en la barra lateral.")
+    st.info("No hay componentes agregados todavia. Agrega componentes en la barra lateral.")
 
 # ---------- FUNCIONES PARA GENERAR ECUACIONES ----------
 def obtener_nodos_unicos(componentes):
@@ -125,10 +125,10 @@ def generar_ecuaciones_componentes(componentes, v_nodos, i_componentes, t):
             ecuaciones_br.append((nombre, ecuacion, "Ley de Ohm"))
         elif tipo == "Capacitor":
             ecuacion = Eq(i_componentes[nombre], valor_total * Derivative(v_diff, t))
-            ecuaciones_br.append((nombre, ecuacion, "Relación Capacitor: i = C·dv/dt"))
+            ecuaciones_br.append((nombre, ecuacion, "Relacion Capacitor: i = C·dv/dt"))
         elif tipo == "Inductor":
             ecuacion = Eq(v_diff, valor_total * Derivative(i_componentes[nombre], t))
-            ecuaciones_br.append((nombre, ecuacion, "Relación Inductor: v = L·di/dt"))
+            ecuaciones_br.append((nombre, ecuacion, "Relacion Inductor: v = L·di/dt"))
         elif tipo == "Fuente de Voltaje":
             if nodo_o == "N0":
                 ecuacion = Eq(v_d - v_o, valor_total)
@@ -151,13 +151,13 @@ def validar_circuito(componentes):
             hay_tierra = True
             break
     if not hay_tierra:
-        errores.append("❌ No hay nodo de referencia (N0). Agrega un componente conectado a tierra.")
+        errores.append("No hay nodo de referencia (N0). Agrega un componente conectado a tierra.")
     nombres = [c['nombre'] for c in componentes]
     if len(nombres) != len(set(nombres)):
-        errores.append("❌ Hay nombres de componentes duplicados.")
+        errores.append("Hay nombres de componentes duplicados.")
     for c in componentes:
         if c['valor'] <= 0:
-            warnings.append(f"⚠️ {c['nombre']} tiene valor {c['valor']}{c['prefijo']}{c['unidad']} (no positivo)")
+            warnings.append(f"El componente {c['nombre']} tiene valor {c['valor']}{c['prefijo']}{c['unidad']} (no positivo)")
     return errores, warnings
 
 def analisis_nodal_basico(componentes, nodos):
@@ -165,7 +165,7 @@ def analisis_nodal_basico(componentes, nodos):
         nodos_no_tierra = [n for n in nodos if n != "N0"]
         n = len(nodos_no_tierra)
         if n == 0:
-            return None, None, None, "No hay nodos para análisis nodal"
+            return None, None, None, "No hay nodos para analisis nodal"
         nodo_idx = {nodo: i for i, nodo in enumerate(nodos_no_tierra)}
         G = zeros(n, n)
         I = zeros(n, 1)
@@ -200,7 +200,7 @@ def analisis_nodal_basico(componentes, nodos):
         fuentes_v = [c for c in componentes if c['tipo'] == "Fuente de Voltaje"]
         mensaje = None
         if fuentes_v:
-            mensaje = "⚠️ El circuito contiene fuentes de voltaje. El análisis nodal básico requiere supernodo."
+            mensaje = "El circuito contiene fuentes de voltaje. El analisis nodal basico requiere supernodo."
         return G, I, nodos_no_tierra, mensaje
     except Exception as e:
         return None, None, None, str(e)
@@ -237,20 +237,20 @@ def dibujar_grafo_con_polaridad(componentes):
             tipo_label = ""
         valor_str = f"{c['valor']}{c['prefijo']}{c['unidad']}"
         if c['tipo_elec'] == "Activo":
-            label = f"{c['nombre']}\n{tipo_label}={valor_str}\n(+) → (-)"
+            label = f"{c['nombre']}\n{tipo_label}={valor_str}\n(+) -> (-)"
         else:
-            label = f"{c['nombre']}\n{tipo_label}={valor_str}\n↓ i"
+            label = f"{c['nombre']}\n{tipo_label}={valor_str}\ni ->"
         G.add_edge(c['nodo_origen'], c['nodo_destino'], 
                    label=label, tipo=c['tipo'], color=color, linewidth=linewidth)
     return G, nodos
 
 # ---------- BOTONES PRINCIPALES ----------
-st.subheader("🎯 Acciones")
+st.subheader("Acciones")
 col1, col2, col3, col4 = st.columns(4)
 
 # ----- Mostrar Grafo -----
 with col1:
-    if st.button("📊 Mostrar Grafo"):
+    if st.button("Mostrar Grafo"):
         if not st.session_state.componentes:
             st.warning("Agrega al menos un componente")
         else:
@@ -264,22 +264,22 @@ with col1:
             nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True, arrowsize=25, arrowstyle='->', ax=ax, connectionstyle="arc3,rad=0.1", width=edge_widths)
             edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
             nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=9, ax=ax, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
-            plt.title("Grafo del Circuito - Polaridad y Dirección de Corriente", fontsize=14, fontweight='bold')
+            plt.title("Grafo del Circuito - Polaridad y Direccion de Corriente", fontsize=14, fontweight='bold')
             plt.axis('off')
             legend_elements = [
                 plt.Line2D([0], [0], color='red', linewidth=2, label='Resistencia (Pasivo)'),
                 plt.Line2D([0], [0], color='blue', linewidth=2, label='Capacitor (Pasivo)'),
                 plt.Line2D([0], [0], color='green', linewidth=2, label='Inductor (Pasivo)'),
-                plt.Line2D([0], [0], color='orange', linewidth=2.5, label='Fuente Voltaje (Activo: + → -)'),
-                plt.Line2D([0], [0], color='purple', linewidth=2.5, label='Fuente Corriente (Activo: + → -)')
+                plt.Line2D([0], [0], color='orange', linewidth=2.5, label='Fuente Voltaje (Activo: + -> -)'),
+                plt.Line2D([0], [0], color='purple', linewidth=2.5, label='Fuente Corriente (Activo: + -> -)')
             ]
             ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
-            plt.figtext(0.02, 0.02, "Activos: flecha del positivo (+) al negativo (-) | Pasivos: dirección convencional de corriente", fontsize=10, style='italic')
+            plt.figtext(0.02, 0.02, "Activos: flecha del positivo (+) al negativo (-) | Pasivos: direccion convencional de corriente", fontsize=10, style='italic')
             st.pyplot(fig)
 
 # ----- Generar Sistema de Ecuaciones -----
 with col2:
-    if st.button("🔧 Generar Ecuaciones"):
+    if st.button("Generar Ecuaciones"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes primero")
         else:
@@ -295,7 +295,7 @@ with col2:
                     i_componentes[c['nombre']] = Function(f'i_{c["nombre"]}')(t)
             ecuaciones_kcl = generar_ecuaciones_kcl(st.session_state.componentes, nodos, i_componentes)
             ecuaciones_br = generar_ecuaciones_componentes(st.session_state.componentes, v_nodos, i_componentes, t)
-            st.subheader("📐 Ecuaciones del Circuito")
+            st.subheader("Ecuaciones del Circuito")
             if ecuaciones_kcl:
                 st.write("**1. Ley de Corrientes de Kirchhoff (KCL)**")
                 for nodo, eq in ecuaciones_kcl:
@@ -308,20 +308,20 @@ with col2:
                     st.caption(f"{desc} - {nombre}")
             total_ecuaciones = len(ecuaciones_kcl) + len(ecuaciones_br)
             total_variables = len(v_nodos) + len(i_componentes)
-            st.subheader("📊 Resumen")
+            st.subheader("Resumen")
             col_a, col_b = st.columns(2)
             with col_a:
                 st.metric("Total Ecuaciones", total_ecuaciones)
             with col_b:
                 st.metric("Total Variables", total_variables)
             if total_ecuaciones == total_variables:
-                st.success("✅ Sistema bien definido")
+                st.success("Sistema bien definido")
             else:
-                st.warning(f"⚠️ Desbalance: {total_ecuaciones} eq vs {total_variables} var")
+                st.warning(f"Desbalance: {total_ecuaciones} eq vs {total_variables} var")
 
 # ----- Generar Código MATLAB -----
 with col3:
-    if st.button("📄 Código MATLAB"):
+    if st.button("Codigo MATLAB"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes primero")
         else:
@@ -357,26 +357,26 @@ grid on;
 """
             else:
                 matlab_code = "%% Circuito\nclear; clc;\n% Agregar ecuaciones manualmente\n"
-            st.subheader("📄 Código MATLAB")
+            st.subheader("Codigo MATLAB Generado")
             st.code(matlab_code, language="matlab")
-            st.download_button("💾 Descargar", data=matlab_code, file_name="circuito.m")
+            st.download_button("Descargar", data=matlab_code, file_name="circuito.m")
 
 # ----- Limpiar Circuito -----
 with col4:
-    if st.button("🗑️ Limpiar Todo"):
+    if st.button("Limpiar Todo"):
         st.session_state.componentes = []
         st.rerun()
 
 # ========== ANALISIS AVANZADO ==========
 st.divider()
-st.subheader("📚 Análisis Avanzado")
+st.subheader("Analisis Avanzado")
 
 col5, col6, col7 = st.columns(3)
 
-# ----- Validación -----
+# ----- Validacion -----
 with col5:
-    with st.expander("🔍 Validar Circuito", expanded=False):
-        if st.button("Ejecutar Validación", key="validar"):
+    with st.expander("Validar Circuito", expanded=False):
+        if st.button("Ejecutar Validacion", key="validar"):
             if not st.session_state.componentes:
                 st.warning("Agrega componentes")
             else:
@@ -385,13 +385,13 @@ with col5:
                     for err in errores:
                         st.error(err)
                 else:
-                    st.success("✅ Sin errores críticos")
+                    st.success("Sin errores criticos")
                 for warn in warnings:
                     st.warning(warn)
 
-# ----- Sistema Completo (KCL + BR) -----
+# ----- Sistema Completo -----
 with col6:
-    with st.expander("📊 Sistema Completo (KCL + BR)", expanded=False):
+    with st.expander("Sistema Completo (KCL + BR)", expanded=False):
         if st.button("Generar Sistema Completo", key="sistema"):
             if not st.session_state.componentes:
                 st.warning("Agrega componentes")
@@ -410,7 +410,7 @@ with col6:
                 ecuaciones_kcl = generar_ecuaciones_kcl(st.session_state.componentes, nodos, i_componentes)
                 ecuaciones_br = generar_ecuaciones_componentes(st.session_state.componentes, v_nodos, i_componentes, t)
                 
-                st.write("### 📌 Sistema de Ecuaciones")
+                st.write("### Sistema de Ecuaciones")
                 st.write("")
                 st.write("**KCL - Ley de Corrientes de Kirchhoff**")
                 for nodo, eq in ecuaciones_kcl:
@@ -424,12 +424,12 @@ with col6:
                 total_var = len(v_nodos) + len(i_componentes)
                 st.info(f"Total ecuaciones: {total_eq} | Total variables: {total_var}")
                 if total_eq == total_var:
-                    st.success("✅ Sistema cuadrado y bien definido")
+                    st.success("Sistema cuadrado y bien definido")
 
-# ----- Análisis Nodal -----
+# ----- Analisis Nodal -----
 with col7:
-    with st.expander("🔢 Análisis Nodal (Matriz G)", expanded=False):
-        if st.button("Ejecutar Análisis Nodal", key="nodal2"):
+    with st.expander("Analisis Nodal (Matriz G)", expanded=False):
+        if st.button("Ejecutar Analisis Nodal", key="nodal2"):
             if not st.session_state.componentes:
                 st.warning("Agrega componentes")
             else:
@@ -463,7 +463,7 @@ with col7:
                     try:
                         if G.det() != 0:
                             V_sol = G.inv() * I
-                            st.write("**Solución (voltajes de nodo):**")
+                            st.write("**Solucion (voltajes de nodo):**")
                             for i, nodo in enumerate(nodos_nt):
                                 st.latex(f"V_{{{nodo}}} = {latex(V_sol[i, 0])}")
                         else:
@@ -472,23 +472,23 @@ with col7:
                         st.warning("No se pudo resolver el sistema")
 
 # ---------- INFORMACION ADICIONAL ----------
-with st.sidebar.expander("ℹ️ Instrucciones"):
+with st.sidebar.expander("Instrucciones"):
     st.markdown("""
-    ### Cómo usar:
+    ### Como usar:
     1. **Nodo N0**: Usa N0 como tierra
     2. **Agrega componentes**: Completa todos los campos
     3. **Mostrar Grafo**: Visualiza polaridad y direcciones
     4. **Generar Ecuaciones**: Obtiene KCL y BR
-    5. **MATLAB**: Descarga código para resolver
+    5. **MATLAB**: Descarga codigo para resolver
     
     ### Ejemplo Circuito RC:
     | Nombre | Tipo | Origen | Destino | Valor |
     |--------|------|--------|---------|-------|
     | V1 | Fuente Voltaje | N0 | N1 | 9 |
     | R1 | Resistencia | N1 | N2 | 27k |
-    | C1 | Capacitor | N2 | N0 | 100μ |
+    | C1 | Capacitor | N2 | N0 | 100u |
     
     ### Polaridad en el Grafo:
-    - **Activos** (Fuentes): (+) → (-)
-    - **Pasivos**: Dirección convencional de corriente
+    - **Activos** (Fuentes): (+) -> (-)
+    - **Pasivos**: Direccion convencional de corriente
     """)
