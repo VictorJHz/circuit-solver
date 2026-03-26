@@ -480,42 +480,45 @@ def generar_reporte_estatico(componentes):
             V_sol = G.inv() * I
             V_numerico = np.array(V_sol).astype(float).flatten()
             
-            # Crear diccionario de voltajes
-            voltajes = {}
+            # Crear diccionario de voltajes (convencion solver)
+            voltajes_solver = {}
             for i, nodo in enumerate(nodos_no_tierra):
-                voltajes[nodo] = V_numerico[i]
+                voltajes_solver[nodo] = V_numerico[i]
             
             # ========== PARTE 1: CONVENCION LIBRO ==========
             st.markdown("### 📖 Resultados en Convencion de Libro")
-            st.write("**Voltajes de nodo (Solver):**")
-            for nodo, v in voltajes.items():
-                st.latex(f"V_{{{nodo}}}^{{solver}} = {v:.4f} \\quad [V]")
+            
+            # Voltajes de nodo en convencion libro: V_libro = -V_solver
+            voltajes_libro = {}
+            for nodo, v in voltajes_solver.items():
+                voltajes_libro[nodo] = -v
             
             st.write("**Voltajes de nodo (Convencion Libro):**")
-            for nodo, v in voltajes.items():
-                st.latex(f"V_{{{nodo}}}^{{libro}} = {-v:.4f} \\quad [V]")
-            st.caption("Nota: Convencion libro considera V = -V_solver")
+            for nodo, v in voltajes_libro.items():
+                st.latex(f"V_{{{nodo}}} = {v:.4f} \\quad [V]")
+            st.caption("Nota: Convencion libro considera V = -V_solver (nodo positivo con respecto a tierra)")
             
-            # ========== PARTE 2: CORRIENTES EN RAMAS ==========
-            st.markdown("### 🔄 Corrientes en Ramas")
+            # ========== PARTE 2: CORRIENTES EN RAMAS (CONVENCION LIBRO) ==========
+            st.markdown("### 🔄 Corrientes en Ramas (Convencion Libro)")
+            st.caption("En convencion libro, la corriente fluye del terminal positivo al negativo")
             
             for c in componentes:
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
+                    v_o_libro = voltajes_libro.get(nodo_o, 0)
+                    v_d_libro = voltajes_libro.get(nodo_d, 0)
                     R = c['valor_total']
-                    i = (v_o - v_d) / R
+                    i_libro = (v_o_libro - v_d_libro) / R
                     
-                    if i > 0:
+                    if i_libro > 0:
                         direccion = f"de {nodo_o} a {nodo_d}"
-                    elif i < 0:
+                    elif i_libro < 0:
                         direccion = f"de {nodo_d} a {nodo_o}"
                     else:
                         direccion = "cero"
                     
-                    st.write(f"**{c['nombre']}:** i = {i:.4f} A → flujo real {direccion}")
+                    st.write(f"**{c['nombre']}:** i = {i_libro:.4f} A → flujo real {direccion}")
             
             # ========== PARTE 3: VALIDACION KCL ==========
             st.markdown("### ✅ Validacion KCL")
@@ -527,15 +530,15 @@ def generar_reporte_estatico(componentes):
                     if c['tipo'] == "Resistencia":
                         nodo_o = c['nodo_origen']
                         nodo_d = c['nodo_destino']
-                        v_o = voltajes.get(nodo_o, 0)
-                        v_d = voltajes.get(nodo_d, 0)
+                        v_o_libro = voltajes_libro.get(nodo_o, 0)
+                        v_d_libro = voltajes_libro.get(nodo_d, 0)
                         R = c['valor_total']
-                        i = (v_o - v_d) / R
+                        i_libro = (v_o_libro - v_d_libro) / R
                         
                         if nodo_o == nodo:
-                            suma += i
+                            suma += i_libro
                         elif nodo_d == nodo:
-                            suma -= i
+                            suma -= i_libro
                     
                     elif c['tipo'] == "Fuente de Corriente":
                         nodo_o = c['nodo_origen']
@@ -552,48 +555,49 @@ def generar_reporte_estatico(componentes):
                 else:
                     st.error(f"❌ Nodo {nodo}: KCL no satisfecha (suma = {suma:.2e} A)")
             
-            # ========== PARTE 4: POTENCIAS ==========
-            st.markdown("### ⚡ Potencias en Elementos")
+            # ========== PARTE 4: POTENCIAS (CONVENCION LIBRO) ==========
+            st.markdown("### ⚡ Potencias en Elementos (Convencion Libro)")
+            st.caption("Para resistencias: P = V·I > 0 (disipacion). Para fuentes: P > 0 entrega, P < 0 absorbe")
             
             potencias = []
             for c in componentes:
                 if c['tipo'] == "Resistencia":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
-                    v = v_o - v_d
+                    v_o_libro = voltajes_libro.get(nodo_o, 0)
+                    v_d_libro = voltajes_libro.get(nodo_d, 0)
+                    v = v_o_libro - v_d_libro
                     i = v / c['valor_total']
                     P = v * i
                     
-                    if P > 0:
-                        tipo = "Disipa"
-                    else:
-                        tipo = "Entrega"
+                    # En resistencia, P siempre debe ser positiva (disipacion)
+                    if P < 0:
+                        P = -P  # Corregir signo por convencion
                     
                     potencias.append({
                         "elemento": c['nombre'],
                         "tipo_comp": c['tipo'],
-                        "voltaje": v,
-                        "corriente": i,
+                        "voltaje": abs(v),
+                        "corriente": abs(i),
                         "potencia": P,
-                        "comportamiento": tipo
+                        "comportamiento": "Disipa"
                     })
-                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {i:.4f} A, P = {P:.4f} W → {tipo}")
+                    st.write(f"**{c['nombre']}:** V = {abs(v):.4f} V, I = {abs(i):.4f} A, P = {P:.4f} W → Disipa")
                 
                 elif c['tipo'] == "Fuente de Corriente":
                     nodo_o = c['nodo_origen']
                     nodo_d = c['nodo_destino']
-                    v_o = voltajes.get(nodo_o, 0)
-                    v_d = voltajes.get(nodo_d, 0)
-                    v = v_o - v_d
+                    v_o_libro = voltajes_libro.get(nodo_o, 0)
+                    v_d_libro = voltajes_libro.get(nodo_d, 0)
+                    v = v_o_libro - v_d_libro
                     I_val = c['valor_total']
                     P = v * I_val
                     
+                    # Para fuente de corriente: P > 0 entrega potencia al circuito
                     if P > 0:
-                        tipo = "Entrega"
+                        comportamiento = "Entrega"
                     else:
-                        tipo = "Disipa"
+                        comportamiento = "Absorbe"
                     
                     potencias.append({
                         "elemento": c['nombre'],
@@ -601,9 +605,9 @@ def generar_reporte_estatico(componentes):
                         "voltaje": v,
                         "corriente": I_val,
                         "potencia": P,
-                        "comportamiento": tipo
+                        "comportamiento": comportamiento
                     })
-                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {I_val:.4f} A, P = {P:.4f} W → {tipo}")
+                    st.write(f"**{c['nombre']}:** V = {v:.4f} V, I = {I_val:.4f} A, P = {P:.4f} W → {comportamiento}")
                 
                 elif c['tipo'] == "Fuente de Voltaje":
                     st.write(f"**{c['nombre']}:** Corriente no determinada en analisis nodal")
