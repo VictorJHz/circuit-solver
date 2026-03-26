@@ -27,16 +27,14 @@ with col_net1:
 
 with col_net2:
     if st.button("Ejemplo RC", use_container_width=True):
-        ejemplo = """V1 N0 N1 9
-R1 N1 N2 27k
-C1 N2 N0 100u"""
+        ejemplo = "V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u"
         st.session_state.netlist_ejemplo = ejemplo
         st.rerun()
 
 # Mostrar ejemplo si existe
 if 'netlist_ejemplo' in st.session_state:
 st.sidebar.code(st.session_state.netlist_ejemplo, language="text")
-st.session_state.netlist_ejemplo = None
+del st.session_state.netlist_ejemplo
 
 # ---------- MOSTRAR COMPONENTES ----------
 st.subheader("Componentes agregados")
@@ -169,7 +167,6 @@ if st.button("Generar Ecuaciones"):
             tau = R * C
             st.subheader("Analisis Completo del Circuito RC")
             
-            # ========== 1. CONVENCION UNICA ==========
             st.write("### 🔷 CONVENCION UNICA Y CONSISTENTE")
             st.markdown("""
             **Convencion de signos adoptada (UNICA para todo el desarrollo):**
@@ -178,25 +175,19 @@ if st.button("Generar Ecuaciones"):
             - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo, Z es operador diferencial)
             """)
             
-            # ========== 2. MATRIZ DE INCIDENCIA A ==========
             st.write("**1. Matriz de Incidencia A (UNICA)**")
             st.write("**Orden de ramas:** [V1, R1, C1]")
             st.write("**Convencion:** +1 sale, -1 entra")
             st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
             st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
             
-            # ========== 3. VECTOR e ==========
             st.write("**2. Vector e (Potenciales nodales)**")
             st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
-            st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
             
-            # ========== 4. KCL ==========
             st.write("**3. KCL en forma matricial**")
             st.latex(r"A \cdot i = 0")
             st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
-            st.caption("Ecuaciones: i_V1 - i_R1 = 0, i_R1 - i_C1 = 0")
             
-            # ========== 5. KVL con interpretacion ==========
             st.write("**4. KVL en forma matricial**")
             st.latex(r"v = A^T \cdot e")
             st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
@@ -205,7 +196,6 @@ if st.button("Generar Ecuaciones"):
             st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
             st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
             
-            # ========== 6. BR EN DOMINIO TIEMPO ==========
             st.write("**5. Relaciones de los Componentes (BR) en dominio tiempo**")
             st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} \quad [V]")
             st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} \quad [V]")
@@ -213,58 +203,44 @@ if st.button("Generar Ecuaciones"):
             st.write("")
             st.write("**Forma integral equivalente del capacitor:**")
             st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
-            st.caption("**NOTA:** En dominio tiempo, no se utiliza matriz Z. Las relaciones son ecuaciones diferenciales/integrales.")
             
-            # ========== 7. ESTRUCTURA DEL METODO TABLEAU ==========
             st.write("**6. Estructura del Metodo de Tablueau (Forma Estandar)**")
             st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & -I \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
-            st.write("")
-            st.write("**Para el circuito RC (dominio tiempo):**")
-            st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix} \text{(operador integral)}")
             
-            # ========== 8. VECTOR Vs ==========
             st.write("**7. Vector Vs (Fuentes de voltaje)**")
             st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix}")
             st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
             
-            # ========== 9. ECUACION DIFERENCIAL ==========
             st.write("**8. Ecuacion Diferencial del Circuito (dominio tiempo)**")
             st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
             st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
             
-            # ========== 10. VARIABLE DE ESTADO ==========
             st.write("**9. Variable de Estado**")
             st.latex(r"x(t) = V_C(t) \quad [V]")
             
-            # ========== 11. ECUACION DE ESTADO ==========
             st.write("**10. Ecuacion de Estado**")
             a = -1/tau
             b = Vin/tau
             st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{V_{{in}}}}{{RC}}")
             st.latex(rf"\dot{{x}} = {a:.4f} x + {b:.4f} \quad [V/s]")
             
-            # ========== 12. CLASIFICACION ==========
             st.write("**11. Clasificacion del Sistema**")
             st.write(f"- **Orden:** Sistema de primer orden")
             st.write(f"- **Linealidad:** Lineal")
             st.write(f"- **Invarianza:** Invariante en el tiempo")
-            st.write(f"- **Tipo:** Pasa-bajas de primer orden")
             
-            # ========== 13. INTERPRETACION FISICA ==========
             st.write("**12. Interpretacion Fisica**")
             st.markdown(f"""
-            - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
-            - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
-            - **Estado estable:** Despues de {5*tau:.2f} s, Vc ≈ {Vin:.1f} V
-            - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
+            - **Carga del capacitor:** Se carga desde 0 V hasta {Vin:.1f} V
+            - **Regimen transitorio:** Dura {5*tau:.2f} s (5τ)
+            - **Constante de tiempo:** τ = {tau:.4f} s
             """)
             
-            # ========== 14. SOLUCION ANALITICA ==========
             st.write("**13. Solucion Analitica**")
             st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
             
         else:
-            st.subheader("Sistema Matricial Completo (Metodo de Tablueau)")
+            st.subheader("Circuito no RC")
             st.info("Para circuitos no RC, se muestra la estructura general del metodo de Tablueau")
 
 # ----- Generar Código MATLAB -----
@@ -277,55 +253,35 @@ if st.button("Codigo MATLAB"):
         
         if R is not None and C is not None and Vin is not None:
             tau = R * C
-            matlab_code = f"""%% Circuito RC - Analisis Completo (Dominio Tiempo)
-%% Parametros: R = {R:.2f} Ohm, C = {C:.2e} F, Vin = {Vin:.2f} V
-%% Constante de tiempo: tau = {tau:.4f} s
-
+            matlab_code = f"""%% Circuito RC
 clear; clc; close all;
 
-%% 1. Variable de estado [V]
+%% Parametros
+R = {R:.10f}; C = {C:.10f}; Vin = {Vin:.10f};
+tau = R*C;
+
+%% Variable de estado
 syms Vc(t)
-R = {R:.10f};
-C = {C:.10f};
-Vin = {Vin:.10f};
-tau = R * C;
-
-%% 2. Ecuacion de estado [V/s]
-%% dVc/dt = -(1/RC)*Vc + Vin/RC
-A = -1/tau;      % [1/s]
-B = Vin/tau;     % [V/s]
-eq = diff(Vc, t) == A*Vc + B;
-
-%% 3. Condicion inicial [V]
+eq = diff(Vc, t) == -1/tau*Vc + Vin/tau;
 cond = Vc(0) == 0;
-
-%% 4. Solucion [V]
 Vc_sol = dsolve(eq, cond);
 
-%% 5. Resultados
-disp('=== SOLUCION DEL CIRCUITO RC ===');
-fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
-pretty(Vc_sol);
+%% Resultados
+disp('Vc(t) = '); pretty(Vc_sol);
+fprintf('tau = %.4f s\\n', tau);
 
-%% 6. Parametros del sistema
-fprintf('\\n=== PARAMETROS DEL SISTEMA ===\\n');
-fprintf('tau = %.4f [s]\\n', tau);
-fprintf('Estado estable = %.2f [V]\\n', Vin);
-fprintf('Transitorio (5tau) = %.4f [s]\\n', 5*tau);
-
-%% 7. Grafica
+%% Grafica
 figure;
 fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
-xlabel('t [s]', 'FontSize', 12);
-ylabel('Vc(t) [V]', 'FontSize', 12);
-title('Respuesta del Circuito RC', 'FontSize', 14);
+xlabel('t (s)'); ylabel('Vc(t) (V)');
+title('Respuesta del Circuito RC');
 grid on;
 hold on;
-plot([0 5*tau], [Vin Vin], '--r', 'LineWidth', 1.5);
-legend('Vc(t)', 'Vin', 'Location', 'best');
+plot([0 5*tau], [Vin Vin], '--r');
+legend('Vc(t)', 'Vin');
 """
         else:
-            matlab_code = "%% Circuito General\nclear; clc;\n% Usar las ecuaciones generadas en la app\n"
+            matlab_code = "%% Circuito General\nclear; clc;\n% Agregar ecuaciones manualmente\n"
         
         st.subheader("Codigo MATLAB Generado")
         st.code(matlab_code, language="matlab")
@@ -343,58 +299,35 @@ st.subheader("Analisis Avanzado")
 
 col5, col6, col7 = st.columns(3)
 
-# ----- Validacion -----
 with col5:
 with st.expander("Validar Circuito", expanded=False):
     if st.button("Ejecutar Validacion", key="validar"):
         if not st.session_state.componentes:
             st.warning("Agrega componentes")
         else:
-            errores = []
-            warnings = []
             hay_tierra = any(c['nodo_origen'] == "N0" or c['nodo_destino'] == "N0" for c in st.session_state.componentes)
             if not hay_tierra:
-                errores.append("No hay nodo de referencia (N0)")
-            nombres = [c['nombre'] for c in st.session_state.componentes]
-            if len(nombres) != len(set(nombres)):
-                errores.append("Nombres duplicados")
-            for c in st.session_state.componentes:
-                if c['valor'] <= 0:
-                    warnings.append(f"{c['nombre']}: valor no positivo")
-            if errores:
-                for err in errores:
-                    st.error(err)
+                st.error("No hay nodo de referencia (N0)")
             else:
-                st.success("Sin errores criticos")
-            for warn in warnings:
-                st.warning(warn)
+                st.success("Circuito valido")
 
-# ----- Matriz de Incidencia -----
 with col6:
 with st.expander("Matriz de Incidencia A", expanded=False):
-    st.write("**Matriz de Incidencia A (UNICA)**")
-    st.write("**Orden de ramas:** [V1, R1, C1]")
-    st.write("**Convencion:** +1 sale, -1 entra")
+    st.write("**Matriz A (UNICA)**")
     st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
-    st.caption("**NOTA:** Esta es la UNICA matriz A. No hay versiones alternativas.")
+    st.caption("+1 sale, -1 entra | Orden: [V1, R1, C1]")
 
-# ----- Metodo Tablueau -----
 with col7:
 with st.expander("Metodo de Tablueau", expanded=False):
-    st.write("### Metodo de Tablueau - Forma Estandar")
-    st.write("")
-    st.write("**Convencion UNICA:**")
-    st.write("- KCL: +1 sale, -1 entra")
-    st.write("- KVL: v = e_origen - e_destino")
-    st.write("- BR: v = Z·i + Vs (dominio tiempo, Z es operador diferencial)")
-    st.write("")
-    st.write("**Estructura estandar:**")
+    st.write("**Forma estandar:**")
     st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & -I \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
-    st.write("")
-    st.write("**Para el circuito RC (dominio tiempo):**")
-    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
-    st.write("")
-    st.write("**Relaciones explicitas:**")
-    st.latex(r"v_{V1} = V_{in}")
-    st.latex(r"v_{R1} = R \cdot i_{R1}")
-    st.latex(r"i
+    st.write("**Para circuito RC:**")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
+
+# ---------- INFORMACION ADICIONAL ----------
+with st.sidebar.expander("Instrucciones"):
+st.markdown("""
+### Como usar:
+1. Agrega componentes individualmente o carga un netlist
+2. Usa N0 como tierra
+3. Ejemplo netlist:
