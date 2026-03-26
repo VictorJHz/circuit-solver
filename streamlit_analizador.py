@@ -31,7 +31,6 @@ def parse_valor(valor_str):
     if not valor_str:
         return None
     valor_str = valor_str.strip().lower()
-    # Eliminar DC, AC, etc si existen
     valor_str = valor_str.split()[0] if ' ' in valor_str else valor_str
     match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
     if match:
@@ -158,6 +157,7 @@ if submit:
                 "needs_current": componentes_disponibles[tipo]["needs_current"]
             })
             st.sidebar.success(f"Agregado {nombre}")
+            st.rerun()
         except:
             st.sidebar.error("Valor numerico invalido")
 
@@ -166,18 +166,36 @@ st.sidebar.divider()
 st.sidebar.header("Netlist")
 with st.sidebar.expander("Cargar desde Netlist"):
     netlist = st.text_area("Pega el netlist:", height=120)
-    if st.button("Cargar Netlist", key="cargar_netlist", use_container_width=True):
-        if netlist.strip():
-            nuevos, errores = parsear_netlist(netlist)
-            for err in errores:
-                st.sidebar.error(err)
-            for c in nuevos:
-                if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
-                    st.session_state.componentes.append(c)
-                    st.sidebar.success(f"Agregado {c['nombre']}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cargar Netlist", key="cargar_netlist", use_container_width=True):
+            if netlist.strip():
+                nuevos, errores = parsear_netlist(netlist)
+                for err in errores:
+                    st.sidebar.error(err)
+                for c in nuevos:
+                    if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
+                        st.session_state.componentes.append(c)
+                        st.sidebar.success(f"Agregado {c['nombre']}")
+                st.rerun()
+            else:
+                st.sidebar.warning("Netlist vacio")
+    with col2:
+        if st.button("Ejemplo RC", key="ejemplo_rc", use_container_width=True):
+            ejemplo = "V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u"
+            st.session_state.ejemplo_netlist = ejemplo
             st.rerun()
-        else:
-            st.sidebar.warning("Netlist vacio")
+
+if 'ejemplo_netlist' in st.session_state:
+    netlist = st.session_state.ejemplo_netlist
+    st.sidebar.code(netlist, language="text")
+    if st.sidebar.button("Usar este ejemplo", key="usar_ejemplo"):
+        nuevos, errores = parsear_netlist(netlist)
+        for c in nuevos:
+            if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
+                st.session_state.componentes.append(c)
+        del st.session_state.ejemplo_netlist
+        st.rerun()
 
 # ---------- MOSTRAR COMPONENTES ----------
 st.subheader("Componentes")
@@ -226,7 +244,10 @@ def dibujar_grafo(cs):
         color = {"Resistencia":"red", "Capacitor":"blue", "Inductor":"green", "Fuente de Voltaje":"orange", "Fuente de Corriente":"purple"}.get(c['tipo'], "gray")
         tipo_label = {"Resistencia":"R", "Capacitor":"C", "Inductor":"L", "Fuente de Voltaje":"V", "Fuente de Corriente":"I"}.get(c['tipo'], "")
         val = f"{c['valor']}{c['prefijo']}{c['unidad']}"
-        label = f"{c['nombre']}\n{tipo_label}={val}\n(+) -> (-)" if c['tipo_elec']=="Activo" else f"{c['nombre']}\n{tipo_label}={val}\ni ->"
+        if c['tipo_elec'] == "Activo":
+            label = f"{c['nombre']}\n{tipo_label}={val}\n(+) -> (-)"
+        else:
+            label = f"{c['nombre']}\n{tipo_label}={val}\ni ->"
         G.add_edge(c['nodo_origen'], c['nodo_destino'], label=label, color=color)
     return G
 
@@ -293,13 +314,3 @@ with b4:
     if st.button("Limpiar Todo", key="limpiar_todo"):
         st.session_state.componentes = []
         st.rerun()
-
-# ---------- INFO ----------
-with st.sidebar.expander("Instrucciones"):
-    st.markdown("""
-    **Netlist formato:**
-      V1 N0 N1 9
-      R1 N1 N2 27k
-      C1 N2 N0 100u
-**N0 es tierra**
-""")      
