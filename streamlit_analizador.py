@@ -1,7 +1,7 @@
 import streamlit as st
 import networkx as nx
 import matplotlib.pyplot as plt
-from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify
+from sympy import symbols, Eq, Derivative, latex, Function, solve, dsolve, Matrix, zeros, simplify, Integral
 import numpy as np
 
 # ---------- CONFIGURACIÓN DE INTERFAZ ----------
@@ -193,7 +193,7 @@ with col2:
                 **Convencion de signos adoptada (UNICA para todo el desarrollo):**
                 - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
                 - **KVL:** v_rama = e_origen - e_destino
-                - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo)
+                - **BR:** v_rama = Z·i_rama + V_s (dominio tiempo, Z es operador diferencial)
                 """)
                 
                 # ========== 2. MATRIZ DE INCIDENCIA A ==========
@@ -223,29 +223,38 @@ with col2:
                 st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
                 st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
                 
-                # ========== 6. BR EN DOMINIO TIEMPO ==========
+                # ========== 6. BR EN DOMINIO TIEMPO (SIN Z) ==========
                 st.write("**5. Relaciones de los Componentes (BR) en dominio tiempo**")
                 st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} \quad [V]")
                 st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} \quad [V]")
                 st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} \quad [A]")
-                st.caption("**NOTA:** Todas las ecuaciones estan en dominio del tiempo (no Laplace)")
+                st.write("")
+                st.write("**Forma integral equivalente del capacitor:**")
+                st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
+                st.caption("**NOTA:** En dominio tiempo, no se utiliza matriz Z. Las relaciones son ecuaciones diferenciales/integrales.")
                 
-                # ========== 7. MATRIZ Z ==========
-                st.write("**6. Matriz Z (Impedancias) - Notacion en tiempo**")
-                st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
-                st.caption("El operador 1/(C·d/dt) representa la relacion integral: v_C = (1/C)∫ i_C dt")
+                # ========== 7. ESTRUCTURA DEL METODO TABLEAU (FORMA ESTANDAR) ==========
+                st.write("**6. Estructura del Metodo de Tablueau (Forma Estandar)**")
+                st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & -I \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
+                st.write("")
+                st.write("**Explicacion de cada bloque:**")
+                st.write("- **Primera fila:** KCL: A·i = 0")
+                st.write("- **Segunda fila:** Relacion v = v (identidad): v - i = 0? No, esta fila establece que v = v (identidad) para la formulacion estandar")
+                st.write("- **Tercera fila:** BR: v - Z·i = V_s")
+                st.write("")
+                st.write("**Para el circuito RC (en dominio tiempo, Z es operador diferencial):**")
+                st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix} \text{(operador integral)}")
+                st.caption("**Nota:** Z no es una matriz de numeros reales, sino un operador diferencial/integral en dominio tiempo.")
                 
                 # ========== 8. VECTOR Vs ==========
                 st.write("**7. Vector Vs (Fuentes de voltaje)**")
                 st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix}")
                 st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
                 
-                # ========== 9. ESTRUCTURA DEL METODO TABLEAU ==========
-                st.write("**8. Estructura del Metodo de Tablueau**")
-                st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
-                st.write("")
-                st.write("**Variables:**")
+                # ========== 9. VARIABLES DEL SISTEMA ==========
+                st.write("**8. Variables del sistema**")
                 st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
+                st.write("Total: 2 + 3 + 3 = 8 variables")
                 
                 # ========== 10. ECUACION DIFERENCIAL ==========
                 st.write("**9. Ecuacion Diferencial del Circuito (dominio tiempo)**")
@@ -279,6 +288,7 @@ with col2:
                 - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
                 - **Estado estable:** Despues de {5*tau:.2f} s, Vc ≈ {Vin:.1f} V
                 - **Constante de tiempo:** τ = {tau:.4f} s (63.2% de la carga final)
+                - **Relacion integral:** v_C(t) = (1/C) ∫ i_C(t) dt
                 """)
                 
                 # ========== 15. SOLUCION ANALITICA ==========
@@ -408,16 +418,21 @@ with col7:
         st.write("**Convencion UNICA:**")
         st.write("- KCL: +1 sale, -1 entra")
         st.write("- KVL: v = e_origen - e_destino")
-        st.write("- BR: v = Z·i + Vs (dominio tiempo)")
+        st.write("- BR: v = Z·i + Vs (dominio tiempo, Z es operador diferencial)")
         st.write("")
-        st.write("**Estructura rigurosa:**")
-        st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
+        st.write("**Estructura estandar:**")
+        st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & -I \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
         st.write("")
-        st.write("**Para el circuito RC:**")
-        st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}, \quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}, \quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}")
+        st.write("**Para el circuito RC (dominio tiempo):**")
+        st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C \cdot \frac{d}{dt}} \end{bmatrix}")
+        st.write("")
+        st.write("**Relaciones explicitas (dominio tiempo):**")
+        st.latex(r"v_{V1} = V_{in}")
+        st.latex(r"v_{R1} = R \cdot i_{R1}")
+        st.latex(r"i_{C1} = C \cdot \frac{d v_{C1}}{dt} \quad \Leftrightarrow \quad v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0)")
         st.write("")
         st.write("**NOTA IMPORTANTE:**")
-        st.write("Todas las ecuaciones estan en **dominio del tiempo**. No se usa transformada de Laplace para mantener consistencia con la ecuacion diferencial final.")
+        st.write("En dominio tiempo, Z es un **operador diferencial/integral**, no una matriz de numeros reales. Por eso es preferible escribir las BR explicitamente en lugar de usar Z.")
 
 # ---------- INFORMACION ADICIONAL ----------
 with st.sidebar.expander("Instrucciones"):
@@ -445,4 +460,5 @@ with st.sidebar.expander("Instrucciones"):
     - Sistema M·x = b con 8 ecuaciones y 8 variables
     - Incluye KCL, KVL y BR en forma matricial
     - Todo en dominio del tiempo (no Laplace)
+    - Z es operador diferencial, no matriz numerica
     """)
