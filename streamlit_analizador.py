@@ -8,7 +8,7 @@ import re
 # ---------- CONFIGURACIÓN ----------
 st.set_page_config(page_title="Circuit Solver", layout="wide")
 st.title("⚡ Circuit Solver")
-st.caption("Analisis de circuitos electricos - Metodo de Tablueau")
+st.caption("Analisis de circuitos electricos - Metodo de Tablueau en dominio tiempo")
 
 # ---------- SESSION STATE ----------
 if 'componentes' not in st.session_state:
@@ -24,127 +24,205 @@ componentes_disponibles = {
 }
 
 prefijos = {"": 1, "p": 1e-12, "n": 1e-9, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
+prefijos_regex = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
-# ---------- FORMULARIO PARA AGREGAR COMPONENTES ----------
+# ---------- FUNCIONES NETLIST ----------
+def parse_valor(valor_str):
+    if not valor_str:
+        return None, None
+    valor_str = valor_str.strip().lower()
+    match = re.match(r'^([\d\.]+)([pnumkM]?)$', valor_str)
+    if match:
+        num_str, pref = match.groups()
+        try:
+            num = float(num_str)
+        except:
+            return None, None
+        if pref == 'p':
+            return num * 1e-12, pref
+        elif pref == 'n':
+            return num * 1e-9, pref
+        elif pref == 'u':
+            return num * 1e-6, pref
+        elif pref == 'm':
+            return num * 1e-3, pref
+        elif pref == 'k':
+            return num * 1e3, pref
+        elif pref == 'M':
+            return num * 1e6, pref
+        return num, ''
+    return None, None
+
+def parsear_netlist(texto):
+    componentes = []
+    errores = []
+    
+    tipo_por_letra = {
+        'V': 'Fuente de Voltaje',
+        'I': 'Fuente de Corriente',
+        'R': 'Resistencia',
+        'C': 'Capacitor',
+        'L': 'Inductor'
+    }
+    
+    for line_num, line in enumerate(texto.strip().split('\n'), 1):
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith(';'):
+            continue
+        
+        if '#' in line:
+            line = line.split('#')[0].strip()
+        if ';' in line:
+            line = line.split(';')[0].strip()
+        
+        if not line:
+            continue
+            
+        parts = line.split()
+        if len(parts) < 4:
+            errores.append(f"Linea {line_num}: Formato incorrecto")
+            continue
+        
+        nombre = parts[0]
+        letra = nombre[0].upper()
+        
+        if letra not in tipo_por_letra:
+            errores.append(f"Linea {line_num}: Tipo '{letra}' no reconocido")
+            continue
+        
+        tipo = tipo_por_letra[letra]
+        nodo_origen = parts[1]
+        nodo_destino = parts[2]
+        
+        valor_str = None
+        for i in range(3, len(parts)):
+            if re.search(r'[\d\.]', parts[i]):
+                valor_str = parts[i]
+                break
+        
+        if not valor_str:
+            errores.append(f"Linea {line_num}: No se encontro valor")
+            continue
+        
+        valor_total, prefijo = parse_valor(valor_str)
+        if valor_total is None:
+            errores.append(f"Linea {line_num}: Valor '{valor_str}' no valido")
+            continue
+        
+        mult = prefijos_regex.get(prefijo, 1)
+        valor_base = valor_total / mult if mult != 1 else valor_total
+        
+        componentes.append({
+            "nombre": nombre,
+            "tipo": tipo,
+            "tipo_corto": componentes_disponibles[tipo]["tipo"],
+            "tipo_elec": componentes_disponibles[tipo]["tipo_elec"],
+            "unidad": componentes_disponibles[tipo]["unidad"],
+            "valor": valor_base,
+            "prefijo": prefijo,
+            "multiplo": mult,
+            "valor_total": valor_total,
+            "nodo_origen": nodo_origen,
+            "nodo_destino": nodo_destino,
+            "needs_current": componentes_disponibles[tipo]["needs_current"]
+        })
+    
+    return componentes, errores
+
+# ---------- FORMULARIO INDIVIDUAL ----------
 st.sidebar.header("Agregar Componente")
 with st.sidebar.form(key='form_componente', clear_on_submit=True):
-    nombre = st.text_input("Nombre del componente (ej: R1, C1, V1, I1)")
-    nodo_origen = st.text_input("Nodo origen (ej: N0, N1...)")
-    nodo_destino = st.text_input("Nodo destino (ej: N0, N1...)")
-    tipo_componente = st.selectbox("Tipo de componente", list(componentes_disponibles.keys()))
-    col_val, col_pref = st.columns([3, 1])
+    nombre = st.text_input("Nombre (R1, C1, V1)")
+    n_origen = st.text_input("Nodo origen (N0, N1...)")
+    n_destino = st.text_input("Nodo destino (N0, N1...)")
+    tipo = st.selectbox("Tipo", list(componentes_disponibles.keys()))
+    col_val, col_pref = st.columns([3,1])
     with col_val:
-        valor_text = st.text_input("Valor (solo número)")
+        valor = st.text_input("Valor")
     with col_pref:
-        prefijo_valor = st.selectbox("Prefijo", list(prefijos.keys()), index=0)
-    submit = st.form_submit_button("Agregar Componente")
+        pref = st.selectbox("Prefijo", list(prefijos.keys()), index=0)
+    submit = st.form_submit_button("Agregar")
 
 if submit:
-    if not nombre or not valor_text or not nodo_origen or not nodo_destino:
-        st.warning("Por favor, llena todos los campos")
+    if not nombre or not valor or not n_origen or not n_destino:
+        st.sidebar.warning("Llena todos los campos")
     else:
         try:
-            float(valor_text)
-            componente = {
-                "nombre": nombre,
-                "tipo": tipo_componente,
-                "tipo_corto": componentes_disponibles[tipo_componente]["tipo"],
-                "unidad": componentes_disponibles[tipo_componente]["unidad"],
-                "valor": float(valor_text),
-                "prefijo": prefijo_valor,
-                "multiplo": prefijos[prefijo_valor],
-                "valor_total": float(valor_text) * prefijos[prefijo_valor],
-                "nodo_origen": nodo_origen,
-                "nodo_destino": nodo_destino,
-                "needs_current": componentes_disponibles[tipo_componente]["needs_current"]
-            }
-            st.session_state.componentes.append(componente)
-            st.success(f"✅ Componente {nombre} agregado correctamente")
+            v = float(valor)
+            st.session_state.componentes.append({
+                "nombre": nombre, "tipo": tipo, "tipo_corto": componentes_disponibles[tipo]["tipo"],
+                "tipo_elec": componentes_disponibles[tipo]["tipo_elec"],
+                "unidad": componentes_disponibles[tipo]["unidad"], "valor": v, "prefijo": pref,
+                "multiplo": prefijos[pref], "valor_total": v * prefijos[pref],
+                "nodo_origen": n_origen, "nodo_destino": n_destino,
+                "needs_current": componentes_disponibles[tipo]["needs_current"]
+            })
+            st.sidebar.success(f"Agregado {nombre}")
+            st.rerun()
         except ValueError:
-            st.error("El valor debe ser un número")
+            st.sidebar.error("Valor numerico invalido")
+
+# ---------- NETLIST ----------
+st.sidebar.divider()
+st.sidebar.header("Netlist")
+with st.sidebar.expander("Cargar desde Netlist", expanded=False):
+    st.markdown("**Formato:** V1 N0 N1 9   o   R1 N1 N2 27k")
+    netlist = st.text_area("Pega el netlist:", height=120)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cargar Netlist", key="cargar_netlist", use_container_width=True):
+            if netlist.strip():
+                nuevos, errores = parsear_netlist(netlist)
+                if errores:
+                    for err in errores:
+                        st.sidebar.error(err)
+                if nuevos:
+                    for c in nuevos:
+                        if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
+                            st.session_state.componentes.append(c)
+                    st.rerun()
+            else:
+                st.sidebar.warning("Netlist vacio")
+    
+    with col2:
+        if st.button("Ejemplo RC", key="ejemplo_rc", use_container_width=True):
+            ejemplo = "V1 N0 N1 9\nR1 N1 N2 27k\nC1 N2 N0 100u"
+            nuevos, errores = parsear_netlist(ejemplo)
+            for c in nuevos:
+                if c['nombre'] not in [x['nombre'] for x in st.session_state.componentes]:
+                    st.session_state.componentes.append(c)
+            st.rerun()
 
 # ---------- MOSTRAR COMPONENTES ----------
-st.subheader("📋 Componentes agregados")
+st.subheader("Componentes")
 if st.session_state.componentes:
+    if st.button("Limpiar Todos", key="clear_all"):
+        st.session_state.componentes = []
+        st.rerun()
+    
     for i, c in enumerate(st.session_state.componentes):
-        col1, col2 = st.columns([4, 1])
+        col1, col2 = st.columns([4,1])
         with col1:
-            st.write(f"**{c['nombre']}**: {c['tipo']} | Valor: {c['valor']}{c['prefijo']}{c['unidad']} | Nodos: {c['nodo_origen']} → {c['nodo_destino']}")
+            st.write(f"**{c['nombre']}**: {c['tipo']} | {c['valor']}{c['prefijo']}{c['unidad']} | {c['nodo_origen']} -> {c['nodo_destino']}")
         with col2:
-            if st.button(f"🗑️", key=f"del_{i}"):
+            if st.button("X", key=f"del_{i}"):
                 st.session_state.componentes.pop(i)
                 st.rerun()
 else:
-    st.info("No hay componentes agregados todavía. Agrega componentes en la barra lateral.")
+    st.info("Sin componentes. Agrega individualmente o con netlist.")
 
-# ---------- FUNCIONES ----------
-def obtener_nodos_unicos(componentes):
+# ---------- FUNCIONES DE ANALISIS ----------
+def obtener_nodos(cs):
     nodos = set()
-    for c in componentes:
+    for c in cs:
         nodos.add(c['nodo_origen'])
         nodos.add(c['nodo_destino'])
     return sorted(list(nodos))
 
-def generar_ecuaciones_kcl(componentes, nodos, i_componentes):
-    ecuaciones_kcl = []
-    for nodo in nodos:
-        if nodo == "N0":
-            continue
-        suma_corrientes = 0
-        for c in componentes:
-            if c['nodo_origen'] == nodo:
-                suma_corrientes += i_componentes[c['nombre']]
-            elif c['nodo_destino'] == nodo:
-                suma_corrientes -= i_componentes[c['nombre']]
-        if suma_corrientes != 0:
-            ecuacion = Eq(suma_corrientes, 0)
-            ecuaciones_kcl.append((nodo, ecuacion))
-    return ecuaciones_kcl
-
-def generar_ecuaciones_componentes(componentes, v_nodos, i_componentes, t):
-    ecuaciones_br = []
-    for c in componentes:
-        nombre = c['nombre']
-        tipo = c['tipo']
-        valor_total = c['valor_total']
-        nodo_o = c['nodo_origen']
-        nodo_d = c['nodo_destino']
-        
-        if nodo_o == "N0":
-            v_o = 0
-        else:
-            v_o = v_nodos[nodo_o]
-        if nodo_d == "N0":
-            v_d = 0
-        else:
-            v_d = v_nodos[nodo_d]
-        v_diff = v_o - v_d
-        
-        if tipo == "Resistencia":
-            ecuacion = Eq(v_diff, valor_total * i_componentes[nombre])
-            ecuaciones_br.append((nombre, ecuacion, "Ley de Ohm"))
-        elif tipo == "Capacitor":
-            ecuacion = Eq(i_componentes[nombre], valor_total * Derivative(v_diff, t))
-            ecuaciones_br.append((nombre, ecuacion, "Relación Capacitor: i = C·dv/dt"))
-        elif tipo == "Inductor":
-            ecuacion = Eq(v_diff, valor_total * Derivative(i_componentes[nombre], t))
-            ecuaciones_br.append((nombre, ecuacion, "Relación Inductor: v = L·di/dt"))
-        elif tipo == "Fuente de Voltaje":
-            if nodo_o == "N0":
-                ecuacion = Eq(v_d - v_o, valor_total)
-            elif nodo_d == "N0":
-                ecuacion = Eq(v_o - v_d, valor_total)
-            else:
-                ecuacion = Eq(v_diff, valor_total)
-            ecuaciones_br.append((nombre, ecuacion, "Fuente de Voltaje"))
-        elif tipo == "Fuente de Corriente":
-            ecuacion = Eq(i_componentes[nombre], valor_total)
-            ecuaciones_br.append((nombre, ecuacion, "Fuente de Corriente"))
-    return ecuaciones_br
-
-def analizar_rc(componentes):
+def analizar_rc(cs):
     R = C = Vin = None
-    for c in componentes:
+    for c in cs:
         if c['tipo'] == "Resistencia":
             R = c['valor_total']
         elif c['tipo'] == "Capacitor":
@@ -153,159 +231,317 @@ def analizar_rc(componentes):
             Vin = c['valor_total']
     return (R, C, Vin) if None not in (R, C, Vin) else (None, None, None)
 
-def dibujar_grafo(componentes):
+def dibujar_grafo_formal(cs):
+    """Genera un grafo formal del circuito"""
     G = nx.MultiDiGraph()
-    nodos = obtener_nodos_unicos(componentes)
+    
+    nodos = obtener_nodos(cs)
     for nodo in nodos:
         G.add_node(nodo)
-    for c in componentes:
-        color = {"Resistencia":"red", "Capacitor":"blue", "Inductor":"green", "Fuente de Voltaje":"orange", "Fuente de Corriente":"purple"}.get(c['tipo'], "gray")
-        tipo_label = {"Resistencia":"R", "Capacitor":"C", "Inductor":"L", "Fuente de Voltaje":"V", "Fuente de Corriente":"I"}.get(c['tipo'], "")
-        val = f"{c['valor']}{c['prefijo']}{c['unidad']}"
-        if c['tipo_elec'] == "Activo":
-            label = f"{c['nombre']}\n{tipo_label}={val}\n(+) -> (-)"
-        else:
-            label = f"{c['nombre']}\n{tipo_label}={val}\ni ->"
-        G.add_edge(c['nodo_origen'], c['nodo_destino'], label=label, color=color)
-    return G
+    
+    ramas_info = []
+    for idx, c in enumerate(cs, 1):
+        nombre_rama = f"b{idx}"
+        origen = c['nodo_origen']
+        destino = c['nodo_destino']
+        
+        G.add_edge(origen, destino, 
+                   label=nombre_rama,
+                   tipo=c['tipo'],
+                   tipo_elec=c['tipo_elec'],
+                   nombre_comp=c['nombre'],
+                   valor=f"{c['valor']}{c['prefijo']}{c['unidad']}")
+        
+        ramas_info.append({
+            "rama": nombre_rama,
+            "origen": origen,
+            "destino": destino,
+            "tipo": c['tipo'],
+            "tipo_elec": c['tipo_elec'],
+            "componente": c['nombre'],
+            "valor": f"{c['valor']}{c['prefijo']}{c['unidad']}"
+        })
+    
+    return G, nodos, ramas_info
+
+def generar_reporte_completo(R, C, Vin):
+    """Genera el reporte completo con todos los bloques de analisis"""
+    tau = R * C
+    
+    st.markdown("---")
+    st.header("📐 Analisis Completo del Circuito RC")
+    
+    # ========== 1. CONVENCION UNICA ==========
+    st.markdown("### 🔷 CONVENCION UNICA Y CONSISTENTE")
+    st.markdown(r"""
+    **Convencion de signos adoptada (UNICA para todo el desarrollo):**
+    - **KCL:** +1 = corriente sale del nodo | -1 = corriente entra al nodo
+    - **KVL:** $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+    - **BR:** $v_{\text{rama}} = Z \cdot i_{\text{rama}} + V_s$ (dominio tiempo, $Z$ es operador diferencial)
+    """)
+    
+    # ========== 2. MATRIZ DE INCIDENCIA A ==========
+    st.markdown("### 1. Matriz de Incidencia A")
+    st.write("**Orden de ramas:** [V1, R1, C1]")
+    st.write("**Convencion:** +1 sale, -1 entra")
+    st.latex(r"A = \begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix}")
+    st.caption("Filas: nodos N1, N2 | Columnas: ramas [V1, R1, C1]")
+    
+    # ========== 3. VECTOR e ==========
+    st.markdown("### 2. Vector e (Potenciales nodales)")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix} \quad [V]")
+    st.caption("Voltajes de los nodos respecto a tierra (N0 = 0V)")
+    
+    # ========== 4. KCL EN FORMA MATRICIAL ==========
+    st.markdown("### 3. KCL en forma matricial")
+    st.latex(r"A \cdot i = 0")
+    st.latex(r"\begin{bmatrix} 1 & -1 & 0 \\ 0 & 1 & -1 \end{bmatrix} \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}")
+    st.caption("Ecuaciones: $i_{V1} - i_{R1} = 0$, $i_{R1} - i_{C1} = 0$")
+    
+    # ========== 5. KVL EN FORMA MATRICIAL ==========
+    st.markdown("### 4. KVL en forma matricial")
+    st.latex(r"v = A^T \cdot e")
+    st.latex(r"\begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix} = \begin{bmatrix} 1 & 0 \\ -1 & 1 \\ 0 & -1 \end{bmatrix} \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}")
+    st.write("**Interpretacion explicita:**")
+    st.latex(r"v_{V1} = V_{N1} - 0 = V_{N1} \quad [V]")
+    st.latex(r"v_{R1} = V_{N1} - V_{N2} \quad [V]")
+    st.latex(r"v_{C1} = V_{N2} - 0 = V_{N2} \quad [V]")
+    
+    # ========== 6. BR EN DOMINIO TIEMPO ==========
+    st.markdown("### 5. Relaciones de los Componentes (BR) en dominio tiempo")
+    st.latex(r"\text{Fuente V1:} \quad v_{V1} = V_{in} = " + f"{Vin:.1f}" + r"\ V")
+    st.latex(r"\text{Resistencia R1:} \quad v_{R1} = R \cdot i_{R1} = " + f"{R:.0f}" + r"\ \Omega \cdot i_{R1}")
+    st.latex(r"\text{Capacitor C1:} \quad i_{C1} = C \cdot \frac{d v_{C1}}{dt} = " + f"{C:.0e}" + r"\ F \cdot \frac{d v_{C1}}{dt}")
+    st.write("")
+    st.write("**Forma integral equivalente del capacitor:**")
+    st.latex(r"v_{C1}(t) = \frac{1}{C} \int_{0}^{t} i_{C1}(\tau) d\tau + v_{C1}(0) \quad [V]")
+    
+    # ========== 7. MATRIZ Z (OPERADOR) ==========
+    st.markdown("### 6. Matriz Z - Operador en dominio tiempo")
+    st.latex(r"Z = \begin{bmatrix} 0 & 0 & 0 \\ 0 & R & 0 \\ 0 & 0 & \frac{1}{C} \left(\frac{d}{dt}\right)^{-1} \end{bmatrix}")
+    st.caption(r"**Nota:** El operador $\left(\frac{d}{dt}\right)^{-1} \equiv \int dt$ representa **integracion en el tiempo**. Para el capacitor: $v_C = \frac{1}{C} \int i_C dt$")
+    
+    # ========== 8. VECTOR Vs ==========
+    st.markdown("### 7. Vector Vs (Fuentes de voltaje)")
+    st.latex(r"V_s = \begin{bmatrix} V_{in} \\ 0 \\ 0 \end{bmatrix} = \begin{bmatrix} " + f"{Vin:.1f}" + r" \\ 0 \\ 0 \end{bmatrix}")
+    st.caption("**Mapeo:** Rama 1 (V1) → Fuente de voltaje Vin | Ramas 2 y 3 → 0")
+    
+    # ========== 9. METODO DE TABLEAU ==========
+    st.markdown("### 8. Metodo de Tablueau - Estructura en Bloques")
+    st.latex(r"\begin{bmatrix} A & 0 & 0 \\ 0 & I & 0 \\ A^T & 0 & -Z \end{bmatrix} \begin{bmatrix} e \\ i \\ v \end{bmatrix} = \begin{bmatrix} 0 \\ 0 \\ V_s \end{bmatrix}")
+    st.write("")
+    st.write("**Dimensiones de los bloques:**")
+    st.write("- **A**: matriz de incidencia (2×3)")
+    st.write("- **I**: matriz identidad (3×3)")
+    st.write("- **Z**: matriz de operadores (3×3)")
+    st.write("- **Sistema total**: 8 ecuaciones × 8 variables")
+    st.write("")
+    st.write("**Variables:**")
+    st.latex(r"e = \begin{bmatrix} V_{N1} \\ V_{N2} \end{bmatrix}_{(2×1)},\quad i = \begin{bmatrix} i_{V1} \\ i_{R1} \\ i_{C1} \end{bmatrix}_{(3×1)},\quad v = \begin{bmatrix} v_{V1} \\ v_{R1} \\ v_{C1} \end{bmatrix}_{(3×1)}")
+    
+    # ========== 10. ECUACION DIFERENCIAL ==========
+    st.markdown("### 9. Ecuacion Diferencial del Circuito")
+    st.latex(rf"{Vin:.1f} - V_C = {R:.0f} \cdot {C:.0e} \cdot \frac{{dV_C}}{{dt}} \quad [V]")
+    st.latex(rf"\frac{{dV_C}}{{dt}} + \frac{{1}}{{{tau:.4f}}} V_C = \frac{{{Vin:.1f}}}{{{tau:.4f}}} \quad [V/s]")
+    st.caption(f"Unidades: $V_C$ [V], $t$ [s], $dV_C/dt$ [V/s]")
+    
+    # ========== 11. VARIABLE DE ESTADO ==========
+    st.markdown("### 10. Variable de Estado")
+    st.latex(r"x(t) = V_C(t) \quad [V]")
+    st.latex(r"u(t) = V_{in} \quad \text{(Entrada)}")
+    st.latex(r"y(t) = V_C(t) \quad \text{(Salida)}")
+    
+    # ========== 12. ECUACION DE ESTADO ==========
+    st.markdown("### 11. Ecuacion de Estado")
+    A_val = -1/tau
+    B_val = 1/tau
+    st.latex(rf"\dot{{x}} = -\frac{{1}}{{RC}} x + \frac{{1}}{{RC}} u")
+    st.latex(rf"\dot{{x}} = {A_val:.6f} x + {B_val:.6f} u \quad [V/s]")
+    st.latex(rf"u(t) = {Vin:.1f} \quad [V]")
+    st.caption(f"Forma estandar: $\dot{{x}} = A x + B u$, $y = x$")
+    st.latex(f"A = {A_val:.6f}\ [1/s],\quad B = {B_val:.6f}\ [1/s],\quad u(t) = {Vin:.1f}\ [V]")
+    
+    # ========== 13. CLASIFICACION DEL SISTEMA ==========
+    st.markdown("### 12. Clasificacion del Sistema")
+    st.write(f"- **Orden:** Sistema de primer orden")
+    st.write(f"- **Linealidad:** Lineal")
+    st.write(f"- **Invarianza:** Invariante en el tiempo")
+    st.write(f"- **Tipo:** Pasa-bajas de primer orden")
+    st.write(f"- **Estabilidad:** Asintoticamente estable (polo en $s = -{1/tau:.4f}$)")
+    
+    # ========== 14. INTERPRETACION FISICA ==========
+    st.markdown("### 13. Interpretacion Fisica")
+    st.markdown(f"""
+    - **Carga del capacitor:** El capacitor se carga desde 0 V hasta {Vin:.1f} V
+    - **Regimen transitorio:** Dura aproximadamente {5*tau:.2f} segundos (5τ)
+    - **Estado estable:** Despues de {5*tau:.2f} s, $V_C \\approx {Vin:.1f}$ V
+    - **Constante de tiempo:** $\\tau = {tau:.4f}$ s (63.2% de la carga final)
+    - **Comportamiento:** Respuesta exponencial creciente: $V_C(t) = {Vin:.1f}(1 - e^{{-t/{tau:.4f}}})$
+    """)
+    
+    # ========== 15. SOLUCION ANALITICA ==========
+    st.markdown("### 14. Solucion Analitica")
+    st.latex(f"V_C(t) = {Vin:.1f} \\cdot (1 - e^{{-t/{tau:.4f}}}) \\quad [V]")
 
 # ---------- BOTONES PRINCIPALES ----------
-st.subheader("🎯 Acciones")
-col1, col2, col3, col4 = st.columns(4)
+st.subheader("Acciones")
+b1, b2, b3, b4 = st.columns(4)
 
-# ----- Mostrar Grafo -----
-with col1:
-    if st.button("📊 Mostrar Grafo"):
+with b1:
+    if st.button("Mostrar Grafo Formal", key="mostrar_grafo"):
         if not st.session_state.componentes:
-            st.warning("Agrega al menos un componente")
+            st.warning("Agrega componentes")
         else:
-            G = dibujar_grafo(st.session_state.componentes)
-            fig, ax = plt.subplots(figsize=(12,8))
-            pos = nx.spring_layout(G, seed=42, k=2)
-            nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=2500, ax=ax)
-            nx.draw_networkx_labels(G, pos, font_size=12, ax=ax)
-            colors = [d['color'] for u,v,d in G.edges(data=True)]
-            nx.draw_networkx_edges(G, pos, edge_color=colors, arrows=True, arrowsize=20, ax=ax)
-            labels = {(u,v): d['label'] for u,v,d in G.edges(data=True)}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=9, ax=ax)
+            G, nodos, ramas_info = dibujar_grafo_formal(st.session_state.componentes)
+            
+            st.subheader("📌 Nodos del Circuito")
+            st.write(f"Nodos identificados: {', '.join(nodos)}")
+            st.caption("N0 = Tierra (referencia)")
+            
+            st.subheader("🔗 Ramas del Circuito")
+            ramas_df = []
+            for r in ramas_info:
+                ramas_df.append({
+                    "Rama": r["rama"],
+                    "Origen": r["origen"],
+                    "Destino": r["destino"],
+                    "Tipo": r["tipo"],
+                    "Tipo Eléctrico": r["tipo_elec"],
+                    "Componente": r["componente"],
+                    "Valor": r["valor"]
+                })
+            st.dataframe(ramas_df, use_container_width=True)
+            
+            st.subheader("📊 Grafo Formal del Circuito")
+            st.caption("Representación: Nodos = puntos | Ramas = flechas | + = origen | - = destino")
+            
+            fig, ax = plt.subplots(figsize=(14, 10))
+            pos = nx.circular_layout(G)
+            
+            nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
+                                   node_size=3000, ax=ax, edgecolors='black', linewidths=2)
+            nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
+            
+            edge_colors = []
+            edge_widths = []
+            for u, v, d in G.edges(data=True):
+                if d['tipo_elec'] == "Activo":
+                    edge_colors.append('orange')
+                    edge_widths.append(3)
+                else:
+                    edge_colors.append('gray')
+                    edge_widths.append(2)
+            
+            nx.draw_networkx_edges(G, pos, edge_color=edge_colors, arrows=True,
+                                   arrowsize=25, arrowstyle='->', ax=ax, 
+                                   connectionstyle="arc3,rad=0.15", width=edge_widths)
+            
+            edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, 
+                                        font_size=10, ax=ax,
+                                        bbox=dict(boxstyle="round,pad=0.3", 
+                                                 facecolor="white", alpha=0.8))
+            
+            for u, v, d in G.edges(data=True):
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                dx = (x2 - x1) * 0.15
+                dy = (y2 - y1) * 0.15
+                
+                ax.text(x1 + dx*0.5, y1 + dy*0.5, '+', 
+                       fontsize=14, fontweight='bold', color='green',
+                       ha='center', va='center')
+                ax.text(x2 - dx*0.5, y2 - dy*0.5, '-', 
+                       fontsize=14, fontweight='bold', color='red',
+                       ha='center', va='center')
+            
+            plt.title("Grafo Formal del Circuito", fontsize=16, fontweight='bold')
             plt.axis('off')
+            
+            legend_elements = [
+                plt.Line2D([0], [0], color='orange', linewidth=3, label='Rama Activa (Fuente)'),
+                plt.Line2D([0], [0], color='gray', linewidth=2, label='Rama Pasiva (R, L, C)'),
+                plt.Line2D([0], [0], marker='+', color='green', markersize=12, linestyle='None', label='Polo Positivo (+)'),
+                plt.Line2D([0], [0], marker='_', color='red', markersize=12, linestyle='None', label='Polo Negativo (-)')
+            ]
+            ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+            
             st.pyplot(fig)
+            
+            with st.expander("📖 Interpretacion del Grafo Formal"):
+                st.markdown(r"""
+                **Convenciones utilizadas:**
+                - **Nodos**: Puntos de conexion electrica (N0 = tierra)
+                - **Ramas**: Elementos del circuito representados como flechas
+                - **Direccion de la flecha**: Sentido de corriente positiva
+                - **+ (verde)**: Terminal positivo (origen) - voltaje mas alto
+                - **- (rojo)**: Terminal negativo (destino) - voltaje mas bajo
+                
+                **Relacion con analisis nodal:**
+                - $v_{\text{rama}} = e_{\text{origen}} - e_{\text{destino}}$
+                - La matriz de incidencia A se construye con +1 en origen, -1 en destino
+                """)
 
-# ----- Generar Sistema de Ecuaciones -----
-with col2:
-    if st.button("🔧 Generar Ecuaciones"):
+with b2:
+    if st.button("Generar Ecuaciones", key="generar_eq"):
         if not st.session_state.componentes:
-            st.warning("Agrega componentes primero")
-        else:
-            t = symbols('t')
-            nodos = obtener_nodos_unicos(st.session_state.componentes)
-            
-            v_nodos = {}
-            for nodo in nodos:
-                if nodo != "N0":
-                    v_nodos[nodo] = Function(f'V_{nodo}')(t)
-            
-            i_componentes = {}
-            for c in st.session_state.componentes:
-                if c['needs_current'] or c['tipo'] == "Fuente de Corriente":
-                    i_componentes[c['nombre']] = Function(f'i_{c["nombre"]}')(t)
-            
-            ecuaciones_kcl = generar_ecuaciones_kcl(st.session_state.componentes, nodos, i_componentes)
-            ecuaciones_br = generar_ecuaciones_componentes(st.session_state.componentes, v_nodos, i_componentes, t)
-            
-            st.subheader("📐 Ecuaciones del Circuito")
-            
-            if ecuaciones_kcl:
-                st.write("**1. Ley de Corrientes de Kirchhoff (KCL)**")
-                for nodo, eq in ecuaciones_kcl:
-                    st.latex(latex(eq))
-                    st.caption(f"KCL en nodo {nodo}")
-            
-            if ecuaciones_br:
-                st.write("**2. Relaciones de los Componentes (BR)**")
-                for nombre, eq, desc in ecuaciones_br:
-                    st.latex(latex(eq))
-                    st.caption(f"{desc} - {nombre}")
-            
-            total_ecuaciones = len(ecuaciones_kcl) + len(ecuaciones_br)
-            total_variables = len(v_nodos) + len(i_componentes)
-            
-            st.subheader("📊 Resumen del Sistema")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.metric("Total Ecuaciones", total_ecuaciones)
-                st.write(f"- KCL: {len(ecuaciones_kcl)}")
-                st.write(f"- BR: {len(ecuaciones_br)}")
-            with col_b:
-                st.metric("Total Variables", total_variables)
-                st.write(f"- Voltajes de nodo: {len(v_nodos)}")
-                st.write(f"- Corrientes: {len(i_componentes)}")
-            
-            if total_ecuaciones == total_variables:
-                st.success("✅ Sistema bien definido (ecuaciones = variables)")
-            else:
-                st.warning(f"⚠️ Desbalance: {total_ecuaciones} eq vs {total_variables} var")
-
-# ----- Generar Código MATLAB -----
-with col3:
-    if st.button("📄 Código MATLAB"):
-        if not st.session_state.componentes:
-            st.warning("Agrega componentes primero")
+            st.warning("Agrega componentes")
         else:
             R, C, Vin = analizar_rc(st.session_state.componentes)
-            
             if R is not None and C is not None and Vin is not None:
-                tau = R * C
-                code = f"""%% Circuito RC - Solución Automática
+                generar_reporte_completo(R, C, Vin)
+            else:
+                st.info("Circuito no RC simple. Agrega una Resistencia, un Capacitor y una Fuente de Voltaje.")
+                st.write("**Componentes actuales:**")
+                for c in st.session_state.componentes:
+                    st.write(f"- {c['nombre']}: {c['tipo']}")
+
+with b3:
+    if st.button("Codigo MATLAB", key="matlab"):
+        R, C, Vin = analizar_rc(st.session_state.componentes)
+        if R is not None and C is not None and Vin is not None:
+            tau = R * C
+            code = f"""% Circuito RC - Analisis Completo
 clear; clc; close all;
 
-R = {R:.10f};
-C = {C:.10f};
-Vin = {Vin:.10f};
-tau = R * C;
+R = {R:.6f}; C = {C:.6f}; Vin = {Vin:.6f}; tau = R*C;
 
 syms Vc(t)
 eq = diff(Vc, t) == -1/tau * Vc + Vin/tau;
 cond = Vc(0) == 0;
 Vc_sol = dsolve(eq, cond);
 
-disp('=== SOLUCIÓN DEL CIRCUITO RC ===');
+disp('=== SOLUCION DEL CIRCUITO RC ===');
+disp('Ecuacion diferencial:');
+disp(eq);
+fprintf('\\nVc(t) = %.2f * (1 - exp(-t/%.4f)) [V]\\n', Vin, tau);
 pretty(Vc_sol);
-fprintf('Vc(t) = %.2f * (1 - exp(-t/%.4f))\\n', Vin, tau);
+
+A = -1/tau; B = 1/tau; u = Vin;
+fprintf('\\n=== FORMA DE ESTADO ===\\n');
+fprintf('dx/dt = %.6f x + %.6f u\\n', A, B);
+fprintf('u(t) = %.2f [V] (entrada)\\n', u);
+
+fprintf('\\n=== PARAMETROS ===\\n');
+fprintf('tau = %.4f [s]\\n', tau);
+fprintf('Estado estable = %.2f [V]\\n', Vin);
+fprintf('5tau = %.4f [s]\\n', 5*tau);
 
 figure;
 fplot(Vc_sol, [0 5*tau], 'LineWidth', 2);
-xlabel('t (s)'); ylabel('Vc(t) (V)');
+xlabel('t [s]'); ylabel('Vc(t) [V]');
 title('Respuesta del Circuito RC');
 grid on;
 hold on;
 plot([0 5*tau], [Vin Vin], '--r');
 legend('Vc(t)', 'Vin');
 """
-                st.code(code, language="matlab")
-                st.download_button("Descargar", code, "circuito_rc.m", key="descargar_matlab")
-            else:
-                st.info("Circuito no RC simple")
+            st.code(code, language="matlab")
+            st.download_button("Descargar codigo MATLAB", code, "circuito_rc.m", key="descargar_matlab")
+        else:
+            st.info("Agrega una Resistencia, un Capacitor y una Fuente de Voltaje para generar el codigo MATLAB.")
 
-# ----- Limpiar Circuito -----
-with col4:
-    if st.button("🗑️ Limpiar Todo"):
+with b4:
+    if st.button("Limpiar Todo", key="limpiar_todo"):
         st.session_state.componentes = []
         st.rerun()
-
-# ---------- INFORMACIÓN ADICIONAL ----------
-with st.sidebar.expander("ℹ️ Instrucciones"):
-    st.markdown("""
-    ### Cómo usar:
-    1. **Nodo N0**: Usa N0 como tierra
-    2. **Agrega componentes**: Completa todos los campos
-    3. **Genera ecuaciones**: Obtiene KCL y BR
-    4. **MATLAB**: Descarga código para resolver
-    
-    ### Ejemplo Circuito RC:
-    | Nombre | Tipo | Origen | Destino | Valor |
-    |--------|------|--------|---------|-------|
-    | V1 | Fuente Voltaje | N0 | N1 | 9 |
-    | R1 | Resistencia | N1 | N2 | 27k |
-    | C1 | Capacitor | N2 | N0 | 100μ |
-    """)
